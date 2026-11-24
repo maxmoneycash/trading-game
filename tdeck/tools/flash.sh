@@ -58,8 +58,18 @@ PY
 )
 echo "booting app slot ${slot}"
 
-"${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before default_reset --after no_reset \
-  write_flash 0x10000 "${image}" | tr '\r' '\n' | grep -vE '^Writing at' | tail -4
+# a deck that drops off USB mid-write keeps its bootloader: wait for it to come back and write again (3 tries)
+for try in 1 2 3; do
+  if "${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before default_reset --after no_reset \
+       write_flash 0x10000 "${image}" > "${backups}/last-write.log" 2>&1; then
+    tr '\r' '\n' < "${backups}/last-write.log" | grep -vE '^Writing at' | tail -3; break
+  fi
+  echo "write ${try} failed: $(tr '\r' '\n' < "${backups}/last-write.log" | grep -v '^Writing at' | tail -1)"
+  (( try < 3 )) || { echo "WRITE FAILED: the app slot may be half written; bootloader intact, replug and run again" >&2; exit 1; }
+  for _ in $(seq 1 120); do shopt -s nullglob; ports=(/dev/cu.usbmodem*); shopt -u nullglob; (( ${#ports[@]} == 1 )) && break; sleep 5; done
+  (( ${#ports[@]} == 1 )) || { echo "WRITE FAILED and the deck did not come back" >&2; exit 1; }
+  port="${ports[0]}"; sleep 2
+done
 if [[ "${slot}" != 0 ]]; then
   "${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before default_reset --after no_reset erase_region 0xe000 0x2000 | tail -1
 fi
