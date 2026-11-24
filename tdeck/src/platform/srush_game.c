@@ -713,6 +713,30 @@ static void bot_prep(void) {
     }
 }
 
+/* Racing a bot: you trade, the bot trades the same chart beside you, on each bar's close, at the same size. */
+static bool botRace;                 /* racing the bot rather than watching it */
+static uint8_t botBeat;              /* the bots you have beaten, a bit each (saved) */
+static int8_t botDir; static float botEntry, botReal; static int botLast, botLead;
+typedef struct { int bar; int8_t dir; } BotMark;
+#define MAXBM 64
+static BotMark bm[MAXBM]; static uint8_t nbm;
+static float leadCallT = -9; static int8_t leadCall;   /* the last change of lead, called beside the rival for 1.6 s */
+static void bot_race_reset(void) { botDir = 0; botEntry = 0; botReal = 0; botLast = lead - 1; nbm = 0; botLead = 0; }
+static float bot_open(void) { return botDir ? NOTIONAL * (rawp(BC(botLast)) / botEntry - 1.0f) * botDir - FEE : 0; }
+static float bot_total(void) { return botReal + bot_open(); }
+static void bot_step(void) {
+    while (botLast < kf - 1 && botLast + 1 < MAXB) {
+        int b = ++botLast; int8_t want = botPos[b];
+        if (botDir && bot_open() <= LIQ_USD) { botReal += LIQ_USD; botDir = 0; if (nbm < MAXBM) { bm[nbm].bar = b; bm[nbm].dir = 0; nbm++; } }
+        if (want != botDir) {
+            if (botDir) botReal += bot_open();
+            botDir = want; if (want) botEntry = rawp(BC(b));
+            if (nbm < MAXBM) { bm[nbm].bar = b; bm[nbm].dir = want; nbm++; }
+            SFX(SFX_CLINK, 0);
+        }
+    }
+}
+
 /* a series as a polyline over the closed visible bars; width 1 or 2 */
 static void ind_line(const int *s, int first, int last, uint8_t col, int w) {
     gfx_SetColor(col);
@@ -1542,6 +1566,16 @@ static char *goal_text(char *o, long t) {
     if (st->goal == G_PEAK) { strcpy(o, "PEAK $"); return digits(o + 6, t, 0, 0); }
     return money_to(o, (float)t, false);
 }
+static void draw_bot_marks(void) {
+    if (botI < 0 || !botRace) return;
+    for (uint8_t i = 0; i < nbm; i++) {
+        int b = bm[i].bar; if (b >= kf) continue;
+        int x = XI(b); if (x < 0 || x >= PR) continue;
+        if (bm[i].dir > 0) tri(x, Y(BL(b)) + 4, 3, 5, true, C_ORANGE);
+        else if (bm[i].dir < 0) tri(x, Y(BH(b)) - 9, 3, 5, false, C_ORANGE);
+        else { gfx_SetColor(C_ORANGE); gfx_FillRectangle(x - 1, Y(BH(b)) - 6, 3, 3); }
+    }
+}
 static void draw_hud(float total, float timeLeft) {
     bool riding = pos.on;
     int kick = now_s - kickT < 0.14f ? -3 : 0;
@@ -1570,7 +1604,23 @@ static void draw_hud(float total, float timeLeft) {
     if (sub) text(sub, px + 9, py + 41, C_MUTED, 1);
     /* what the plate does not hold, under it: the streak, the combo, Blow-Up's leverage */
     int ly = py + ph + 5;
-    if (botI >= 0) { text(BOT_NAME[botI], px + 4, ly, C_ORANGE, 1); ly += 11; }   /* who is trading */
+    if (botI >= 0 && !botRace) { text(BOT_NAME[botI], px + 4, ly, C_ORANGE, 1); ly += 11; }   /* who is trading */
+    if (botI >= 0 && botRace) { /* the rival: its name, its side, its P&L, a plate like yours but smaller */
+        float bt = bot_total(); char r[24]; money_to(r, bt, false);
+        int rw = textw(BOT_NAME[botI], 1) + textw(r, 1) + (botDir ? 30 : 22);
+        frame(px, ly - 3, rw, 15, 4, botLead < 0 ? C_ORANGE : C_BORDER, C_CARD);
+        text(BOT_NAME[botI], px + 6, ly + 1, C_ORANGE, 1);
+        int rx = px + 6 + textw(BOT_NAME[botI], 1) + 5;
+        if (botDir) { mark(rx, ly + 2, botDir > 0, botDir > 0 ? C_GAIN : C_BEAR); rx += 10; }
+        text(r, rx, ly + 1, bt < -0.5f ? C_BEAR : C_TEXT, 1);
+        if (now_s - leadCallT < 1.6f) { /* who just took the lead */
+            const char *c = leadCall > 0 ? "YOU LEAD" : "BOT LEADS"; int cw = textw(c, 1) + 10, cy = ly + 15;   /* under the rival, clear of the caption */
+            int pop = now_s - leadCallT < 0.12f ? 2 : 0;
+            rr(px, cy - 3 - pop, cw, 15, 3, leadCall > 0 ? C_TEXT : C_ORANGE);
+            txtBg = leadCall > 0 ? C_TEXT : C_ORANGE; text(c, px + 5, cy + 1 - pop, C_INK, 1); txtBg = C_BG;
+        }
+        ly += 17;
+    }
     if (mode == M_CALLIT && callStreak > 1) { d[0] = 'x'; char *o = digits(d + 1, callStreak, 0, 0); strcpy(o, " STREAK"); text(d, px + 4, ly, C_ORANGE, 1); }
     if (combo > 1) { d[0] = 'x'; char *o = digits(d + 1, combo, 0, 0); strcpy(o, " COMBO"); text(d, px + 4, ly, C_ORANGE, 1); }
 
@@ -1772,21 +1822,22 @@ static void load_save(void) {
     ti_var_t v = ti_Open("SRSAVE", "r");
     if (!v) return;
     char tag[2] = { 0, 0 };
-    if (ti_GetSize(v) >= 2 + 1 + 4 * NMODES + 1 + 3 && ti_Read(tag, 1, 2, v) == 2 && tag[0] == 'S' && tag[1] >= '2' && tag[1] <= '5') {
+    if (ti_GetSize(v) >= 2 + 1 + 4 * NMODES + 1 + 3 && ti_Read(tag, 1, 2, v) == 2 && tag[0] == 'S' && tag[1] >= '2' && tag[1] <= '6') {
         ti_Read(&plays, 1, 1, v); ti_Read(bestM, sizeof bestM, 1, v); ti_Read(&hasM, 1, 1, v); ti_Read(&dailyDay, 3, 1, v);
         if (tag[1] >= '3') ti_Read(starsOf, 1, NSTAGE, v);
         if (tag[1] >= '5') { ti_Read(&msDay, 3, 1, v); ti_Read(msIds, 1, 3, v); ti_Read(&msDone, 1, 1, v); ti_Read(&msBonus, 1, 1, v); ti_Read(msProg, 4, 3, v); }
         if (tag[1] >= '4') { ti_Read(&xp, 4, 1, v); ti_Read(&cash, 4, 1, v); ti_Read(&owned, 2, 1, v); ti_Read(&themeI, 1, 1, v); if (themeI >= NTHEME) themeI = 0; owned |= 3; }
+        if (tag[1] >= '6') ti_Read(&botBeat, 1, 1, v);
     } else { ti_Rewind(v); if (ti_GetSize(v) >= 4) { ti_Read(&bestM[M_PRO], 4, 1, v); hasM = 1 << M_PRO; } if (ti_GetSize(v) >= 5) ti_Read(&plays, 1, 1, v); }
     ti_Close(v);
 }
 static void save_save(void) {
     ti_var_t v = ti_Open("SRSAVE", "w");
     if (!v) return;
-    ti_Write("S5", 1, 2, v); ti_Write(&plays, 1, 1, v); ti_Write(bestM, sizeof bestM, 1, v); ti_Write(&hasM, 1, 1, v); ti_Write(&dailyDay, 3, 1, v);
+    ti_Write("S6", 1, 2, v); ti_Write(&plays, 1, 1, v); ti_Write(bestM, sizeof bestM, 1, v); ti_Write(&hasM, 1, 1, v); ti_Write(&dailyDay, 3, 1, v);
     ti_Write(starsOf, 1, NSTAGE, v);
     ti_Write(&msDay, 3, 1, v); ti_Write(msIds, 1, 3, v); ti_Write(&msDone, 1, 1, v); ti_Write(&msBonus, 1, 1, v); ti_Write(msProg, 4, 3, v);
-    ti_Write(&xp, 4, 1, v); ti_Write(&cash, 4, 1, v); ti_Write(&owned, 2, 1, v); ti_Write(&themeI, 1, 1, v);
+    ti_Write(&xp, 4, 1, v); ti_Write(&cash, 4, 1, v); ti_Write(&owned, 2, 1, v); ti_Write(&themeI, 1, 1, v); ti_Write(&botBeat, 1, 1, v);
     ti_Close(v);
 }
 
@@ -2029,6 +2080,7 @@ static bool menu(uint8_t *sel) {
         latch();
         uint8_t n = tab_rows(), *row = tab_row();
         int tabTo = -1, marketStep = 0;
+        bool watch = tab == 1 && focus == 2 && go;   /* on the bots' market row, ENTER watches */
 #ifdef SR_TOUCH
         if (sr.tapped) { /* what the finger touched */
             sr.tapped = false;
@@ -2037,6 +2089,11 @@ static bool menu(uint8_t *sel) {
             else if (tx >= LIST_X && tx < LIST_X + LIST_W && ty >= LIST_Y && ty < LIST_Y + ROWS * ROW_H && tab != 3) {
                 int r = topOf[tab] + (ty - LIST_Y) / ROW_H;
                 if (r < n) { focus = 1; if (r == *row) go = true; else { *row = (uint8_t)r; SFX(SFX_TAP, 0); } }
+            }
+            else if (ty >= 198 && tab == 1) { /* the bots: the market, WATCH, RACE */
+                if (tx < 146) { focus = 2; if (tx < 50) marketStep = -1; else if (tx > 96) marketStep = 1; }
+                else if (tx < 212) { go = true; watch = true; }
+                else go = true;
             }
             else if (ty >= 198 && tx < 180) { focus = 2; if (tx < 60) marketStep = -1; else if (tx > 120) marketStep = 1; }
             else if (ty >= 198 && tx >= 184) go = true;
@@ -2074,7 +2131,7 @@ static bool menu(uint8_t *sel) {
                 SFX(SFX_WRONG, 0);
             } else {
                 stage = -1;
-                if (tab == 1) { botI = (int8_t)botSel; mode = M_PRO; }
+                if (tab == 1) { botI = (int8_t)botSel; botRace = !watch; mode = M_PRO; }
                 else { botI = -1; mode = tab == 3 ? M_FREE : menuI; }
                 if (mode == M_FREE) *sel = w;
                 return true;
@@ -2112,6 +2169,7 @@ static bool menu(uint8_t *sel) {
                 if (hasM & (1 << i)) { best_text(d, (uint8_t)i); text_r(d, LIST_X + LIST_W - 6, ty, bestM[i] < 0 ? C_BEAR : C_MUTED, 1); }
             } else if (tab == 1) {
                 text(BOT_NAME[i], LIST_X + 13, ty, col, 1);
+                if (botBeat & (1 << i)) { int cx = LIST_X + LIST_W - 16; gfx_SetColor(C_ORANGE); gfx_Line(cx, ty + 3, cx + 3, ty + 6); gfx_Line(cx + 3, ty + 6, cx + 9, ty); gfx_Line(cx, ty + 4, cx + 3, ty + 7); gfx_Line(cx + 3, ty + 7, cx + 9, ty + 1); }
             } else if (tab == 2) {
                 bool open = stage_open(i);
                 o = digits(d, i + 1, 0, 0); *o++ = ' '; strcpy(o, CAREER[i].name);
@@ -2154,7 +2212,7 @@ static bool menu(uint8_t *sel) {
                 text(BOT_NAME[botSel], px, y, C_TEXT, textw(BOT_NAME[botSel], 2) <= pw ? 2 : 1); y += 20;
                 y = text_wrap(BOT_DESC[botSel], px, y, pw, C_MUTED);
                 if (172 - (y + 4) >= 14) mini_chart(px, y + 4, pw, 172 - (y + 4));   /* the chart takes what the words leave */
-                text("PRO  1:00  25x", px, 178, C_MUTED, 1);
+                text_r(botBeat & (1 << botSel) ? "BEATEN" : "UNBEATEN", px + pw, 178, botBeat & (1 << botSel) ? C_ORANGE : C_MUTED, 1);
             } else if (tab == 2) {
                 const Stage *st = &CAREER[stSel]; bool open = stage_open(stSel);
                 strcpy(d, "CAREER "); digits(d + 7, stSel + 1, 0, 0); text(d, px, y, C_ORANGE, 1); y += 12;
@@ -2175,7 +2233,8 @@ static bool menu(uint8_t *sel) {
             }
         }
         /* bottom: the market (left and right step it) and the action */
-        frame(6, 200, 172, 32, 6, focus == 2 ? C_MUTED : C_BORDER, C_CARD);
+        int mw = tab == 1 ? 140 : 172;
+        frame(6, 200, mw, 32, 6, focus == 2 ? C_MUTED : C_BORDER, C_CARD);
         if (tab == 4) { text("TO SPEND", 16, 206, C_MUTED, 1); o = digits(d, (long)cash, 0, 0); strcpy(o, " XP"); text(d, 16, 217, C_TEXT, 1); }
         else {
             bool arrows = !fixed;
@@ -2183,13 +2242,17 @@ static bool menu(uint8_t *sel) {
             text(W.sym, 26, 208, C_TEXT, 2);
             int dx = 26 + textw(W.sym, 2) + 8;
             const char *when = tab == 3 || (tab == 0 && menuI == M_FREE) ? (dailyDay == today() ? "REPLAY" : "TODAY") : date(W.start);
-            text(when, dx, 212, C_MUTED, 1);
-            if (arrows) { gfx_SetColor(focus == 2 ? C_TEXT : C_MUTED); gfx_FillTriangle(166, 210, 166, 222, 172, 216); }
+            if (dx + textw(when, 1) <= mw - 10) text(when, dx, 212, C_MUTED, 1);   /* a long ticker keeps the row */
+            if (arrows) { gfx_SetColor(focus == 2 ? C_TEXT : C_MUTED); gfx_FillTriangle(mw - 6, 210, mw - 6, 222, mw, 216); }
         }
         {
-            const char *act = tab == 1 ? "RUN BOT" : tab == 4 ? (themeI == shopSel ? "WEARING" : (owned & (1 << shopSel)) ? "WEAR" : "BUY") : "PLAY";
+            const char *act = tab == 1 ? "RACE" : tab == 4 ? (themeI == shopSel ? "WEARING" : (owned & (1 << shopSel)) ? "WEAR" : "BUY") : "PLAY";
             bool dead = (tab == 2 && !stage_open(stSel)) || (tab == 4 && themeI == shopSel) || (tab == 4 && !(owned & (1 << shopSel)) && cash < THEMES[shopSel].price);
-            if (dead) { frame(184, 202, 130, 26, 6, C_BORDER, C_CARD); text_c(act, 249, 211, C_MUTED, 1); }
+            if (tab == 1) { /* watch it alone, or race it */
+                frame(150, 202, 58, 26, 6, focus == 2 ? C_MUTED : C_BORDER, C_CARD); text_c("WATCH", 179, 211, focus == 2 ? C_TEXT : C_MUTED, 1);
+                keycap(214, 202, 100, act);
+            }
+            else if (dead) { frame(184, 202, 130, 26, 6, C_BORDER, C_CARD); text_c(act, 249, 211, C_MUTED, 1); }
             else keycap(184, 202, 130, act);
         }
         present();
@@ -2233,7 +2296,7 @@ static bool play(uint8_t sel, float *out_total) {
     float roundSecs = stage >= 0 ? (float)CAREER[stage].secs : mode == M_BLOWUP ? 0 : ROUND_SECS;
     preset = botI >= 0 ? BOT_PRESET[botI] : forcePreset >= 0 ? (uint8_t)forcePreset : (uint8_t)(plays % 4); /* the web rotates its four sets, one a round; a bot brings its own */
     ind_compute();
-    if (botI >= 0) bot_prep();
+    if (botI >= 0) { bot_prep(); bot_race_reset(); }
     bool prevL = true, prevD = true, ended = false; float endT = 0, endAt = -1;
     frame_prep(); camera(0, true);
     scene = 1; frames = 0;
@@ -2245,12 +2308,24 @@ static bool play(uint8_t sel, float *out_total) {
         scan();
         if (quit_now || (K6 & kb_Clear)) { latch(); return false; }
         bool L = (K1 & kb_2nd) || (K7 & kb_Up), D = (K7 & kb_Down) && (shorts() || mode == M_CALLIT);
-        if (botI >= 0) { /* the bot holds for you: long, short (a slide), or lets go */
+        if (botI >= 0 && !botRace) { /* watching: the bot holds for you: long, short (a slide), or lets go */
             int b = kf - 1; if (b < 0) b = 0; if (b >= MAXB) b = MAXB - 1;
             int8_t w = introT > 0 ? 0 : botPos[b];
             L = w != 0; D = w < 0;
         }
 
+        if (botI >= 0 && botRace && introT <= 0 && !ended) { /* the rival trades its bars; a change of lead is called out */
+            bot_step();
+            float diff = realized + (pos.on ? openPnl : 0) - bot_total();
+            static float leadT;   /* a change of lead is called at most every 3 s, so a seesaw stays quiet */
+            int ld = diff > 40 ? 1 : diff < -40 ? -1 : botLead;
+            if (ld != botLead && ld && now_s - leadT > 3) {
+                leadT = now_s;
+                if (ld > 0) SFX(SFX_DING, 2); else SFX(SFX_WRONG, 0);
+                leadCallT = now_s; leadCall = (int8_t)ld;
+            }
+            if (ld != botLead && ld) botLead = ld;
+        }
         /* short-lived effects age on every path */
         for (uint8_t i = 0; i < 3; i++) if (flo[i].on && (flo[i].life -= dt) <= 0) flo[i].on = false;
         shake *= exp_f(-dt * 9);
@@ -2412,6 +2487,7 @@ static bool play(uint8_t sel, float *out_total) {
         draw_trails();
         draw_ride(); T_(4)
         draw_marks();
+        draw_bot_marks();
         draw_reticle();
         ox = oy = 0;
         draw_axes(true); draw_time_row(); T_(5)
@@ -2477,11 +2553,14 @@ static bool results(uint8_t sel, float total, bool record) {
         text(line, 14, 10, C_MUTED, 1);
         /* the verdict chip, then the number between corner brackets: it stamps in on the beat */
         {
-            const char *v = mode == M_CALLIT ? "SCORE" : win ? "PROFIT" : loss ? "LOSS" : "FLAT";
-            int w = textw(v, 1) + (mode == M_CALLIT || (!win && !loss) ? 12 : 22);
-            rr(14, 24, w, 14, 3, C_TEXT);
-            txtBg = C_TEXT; text(v, 20, 28, C_INK, 1); txtBg = C_BG;
-            if (mode != M_CALLIT && (win || loss)) mark(20 + textw(v, 1) + 5, 29, win, C_INK);
+            bool raced = botI >= 0 && botRace, beat = raced && total > bot_total();
+            const char *v = raced ? (beat ? "YOU WON" : "BOT WON") : mode == M_CALLIT ? "SCORE" : win ? "PROFIT" : loss ? "LOSS" : "FLAT";
+            bool up = raced ? beat : win, arrow = raced || (mode != M_CALLIT && (win || loss));
+            int w = textw(v, 1) + (arrow ? 22 : 12);
+            uint8_t chip = raced && !beat ? C_ORANGE : C_TEXT;   /* the bot's win wears the bot's colour */
+            rr(14, 24, w, 14, 3, chip);
+            txtBg = chip; text(v, 20, 28, C_INK, 1); txtBg = C_BG;
+            if (arrow) mark(20 + textw(v, 1) + 5, 29, up, C_INK);
         }
         int bx0 = 12, bx1 = 204, by0 = 44, by1 = 98;
         gfx_SetColor(C_MUTED);
@@ -2508,6 +2587,10 @@ static bool results(uint8_t sel, float total, bool record) {
                 o = digits(o, n - good, 0, 0); strcpy(o, mode == M_CALLIT ? " WRONG" : " MISSED");
                 text_c(line, (bx0 + bx1) / 2, 121, C_MUTED, 1);
             } else text_c("NO RIDES", (bx0 + bx1) / 2, 121, C_MUTED, 1);
+        }
+        if (botI >= 0 && botRace) { /* the rival's result, under the brackets' top edge */
+            char r[32]; strcpy(r, BOT_NAME[botI]); strcat(r, " "); money_to(r + strlen(r), bot_total(), false);
+            text_r(r, bx1, 28, total > bot_total() ? C_MUTED : C_ORANGE, 1);
         }
         /* the numbers, a column on the right */
         frame(214, 24, 102, 116, 6, C_BORDER, C_CARD);
@@ -2622,15 +2705,16 @@ int srush_main(void) {
         for (;;) {
             float total;
             if (!play(sel, &total)) break;
-            bool record = stage < 0 && autoshot < 0 && botI < 0 && (!(hasM & (1 << mode)) || total > bestM[mode]);
+            bool record = stage < 0 && autoshot < 0 && (botI < 0 || botRace) && (!(hasM & (1 << mode)) || total > bestM[mode]);
             if (record) { bestM[mode] = total; hasM |= (uint8_t)(1 << mode); }
             if (stage >= 0) { runStars = stars_for(stage_value(0)); prevStars = starsOf[stage]; if (runStars > starsOf[stage] && autoshot < 0) starsOf[stage] = runStars; }
             lvBefore = level_of(xp);
             runXp = run_xp() + (stage >= 0 && runStars > prevStars ? 80L * (runStars - prevStars) : 0);
-            if (botI >= 0) runXp = 0;   /* a bot's run is for watching: no XP */
+            if (botI >= 0 && !botRace) runXp = 0;   /* watching a bot earns nothing */
+            if (botI >= 0 && botRace && autoshot < 0 && total > bot_total() && !(botBeat & (1 << botI))) { botBeat |= (uint8_t)(1 << botI); runXp += 100; }   /* first win over this bot */
             if (autoshot < 0) { xp += (unsigned long)runXp; cash += (unsigned long)runXp; }
             if (mode == M_RUSH) for (uint8_t i = 0; i < nset; i++) { Setup st; get_setup(i, &st); if (locked[i] && !st.win && !(ridden & (1UL << (i & 31)))) goodSkips++; }
-            if (autoshot < 0 && botI < 0) {
+            if (autoshot < 0 && (botI < 0 || botRace)) {
                 long pay = progress_missions(stage >= 0 && runStars > prevStars ? runStars - prevStars : 0, mode == M_FREE && dailyDay != today());
                 runXp += pay; xp += (unsigned long)pay; cash += (unsigned long)pay;
             }

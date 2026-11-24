@@ -169,7 +169,10 @@ void sr_audio_render(int16_t *out, int n)
         env = a > env ? env + (a - env) * 0.4f : env * 0.99977f;
         float thr = 0.158f, gain = env > thr ? (thr + (env - thr) / 4) / env : 1;
         x *= gain * 0.9f * SR_AUDIO_GAIN;
-        if (x > 1) x = 1; else if (x < -1) x = -1;
+        { /* a soft knee above 0.6 instead of a hard clip: loud hits round off rather than crackle */
+            float m = x < 0 ? -x : x;
+            if (m > 0.6f) { float t = (m - 0.6f) / 0.4f; m = 0.6f + 0.4f * t / (1 + t); x = x < 0 ? -m : m; }
+        }
         out[s] = (int16_t)(x * 32000);
     }
 }

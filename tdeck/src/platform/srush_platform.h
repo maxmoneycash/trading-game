@@ -23,7 +23,7 @@ enum { SFX_TAP, SFX_CANDLE, SFX_LOCK, SFX_OPEN, SFX_FLIP, SFX_WIN, SFX_BIG, SFX_
        SFX_TICK, SFX_DING, SFX_COUNT, SFX_COMBO, SFX_CLINK, SFX_STAMP, SFX_COLLECT };
 #define SR_AUDIO_RATE 22050
 #ifndef SR_AUDIO_GAIN
-#define SR_AUDIO_GAIN 3.0f   /* the speaker is small: fx.js's levels, lifted (the mix is clipped at full scale) */
+#define SR_AUDIO_GAIN 7.0f   /* the speaker is small: fx.js's levels, lifted well up (a soft knee rounds the peaks) */
 #endif
 void sr_sfx(int id, int arg);
 void sr_audio_render(int16_t *out, int n);  /* mono, SR_AUDIO_RATE */
