@@ -317,6 +317,7 @@ static uint8_t aa_pair(uint8_t col, uint8_t bg) {
     aaKey[best][0] = f; aaKey[best][1] = k; aaAge[best] = aaClock | 1;
     return (uint8_t)(160 + 2 * best);
 }
+static bool txtClip;   /* set while drawing text that scrolls past the screen edges */
 static int textw(const char *s, uint8_t sc) {
     if (!FNT) { gfx_SetTextScale(sc, sc); return gfx_GetStringWidth(s); }
     const uint8_t *fb = font_of(sc); int w = 0;
@@ -335,13 +336,16 @@ static void text(const char *s, int x, int y, uint8_t col, uint8_t sc) {
     uint8_t f = sc <= 1 ? 0 : sc == 2 ? 1 : sc == 3 ? 2 : 3;
     const uint8_t *fb = font_of(sc);
     int w = textw(s, sc);
-    if (x < 0) x = 0;
-    if (x + w > 320) x = 320 - w;
+    if (!txtClip) {
+        if (x < 0) x = 0;
+        if (x + w > 320) x = 320 - w;
+    }
     y -= capTop[f];                                   /* y names the top of the capitals, as the old font's did */
     uint8_t pair = aa_pair(col, txtBg), lv[4] = { 0, pair, (uint8_t)(pair + 1), col };
     for (; *s; s++) {
         const uint8_t *g = glyph_of(fb, *s);
         if (!g) continue;
+        if (txtClip && (x < 0 || x + g[4] > 320)) { x += g[4]; continue; }   /* scrolling text: a glyph off the edge is left out */
         int gx = x + (int8_t)g[0], gy = y + (int8_t)g[1], h = g[3];
         const uint8_t *p = g + 5;
         for (int r = 0; r < h; r++) {
@@ -560,7 +564,7 @@ static long nice_step(long raw, uint8_t *show) {
 static long gridStep; static uint8_t gridShow; static long gridLoRaw, gridHiRaw;
 static void grid_prep(void) {
     gridLoRaw = raw_of((int)camLo); gridHiRaw = raw_of((int)camHi);
-    gridStep = nice_step((gridHiRaw - gridLoRaw) / 4, &gridShow);
+    gridStep = nice_step((gridHiRaw - gridLoRaw) / 6, &gridShow);   /* the app: niceStep((hi - lo) / 6) */
 }
 
 
@@ -570,7 +574,8 @@ static void grid_prep(void) {
 #define PANE_H 42
 enum {
     I_BLUE = 70, I_BLUE7, I_BLUE5, I_BLUE35, I_BLUE25, I_BLUEF, I_BLUE8, I_VIO, I_VIO7, I_VIO5, I_VIO35, I_VIO25, I_VIOF,
-    I_GOLD, I_GOLD4, I_GOLDF, I_SQZ, I_GRAY6, I_GRAY3, I_GRAYF, I_TEXT45, I_BEAR45, I_TEXT3, I_BEAR3, I_STUP, I_STDN, I_TEXT8
+    I_GOLD, I_GOLD4, I_GOLDF, I_SQZ, I_GRAY6, I_GRAY3, I_GRAYF, I_TEXT45, I_BEAR45, I_TEXT3, I_BEAR3, I_STUP, I_STDN, I_TEXT8,
+    I_VOLU, I_VOLD
 };
 static void ind_palette(void) {
     static const uint32_t B = 0x8ab4f8UL, V = 0xb4a2ffUL, G = 0xe9b949UL, GR = 0x8a8a8eUL;
@@ -580,6 +585,7 @@ static void ind_palette(void) {
     setai(I_GRAY6, GR, 154); setai(I_GRAY3, GR, 77); setai(I_GRAYF, GR, 15);
     setai(I_TEXT45, RGB_TEXT, 115); setai(I_BEAR45, RGB_BEAR, 115); setai(I_TEXT3, RGB_TEXT, 77); setai(I_BEAR3, RGB_BEAR, 77);
     setai(I_STUP, B, 15); setai(I_STDN, V, 18); setai(I_TEXT8, RGB_TEXT, 205);
+    setai(I_VOLU, RGB_TEXT, 36); setai(I_VOLD, RGB_BEAR, 46);   /* volume, as the app's floor bars */
 }
 
 static uint8_t preset;
@@ -953,7 +959,7 @@ static void draw_caption(void) {
     if (age > 2.6f && !callOn) return;
     Setup s; get_setup((uint8_t)lockI, &s);
     bool up = s.dir > 0;
-    int x = 150, y = 9;
+    int x = 122, y = 34;   /* under the clock pill, right of the score plate */
     const char *kick = callOn ? "CALL IT" : callTag ? callTag : "PATTERN LOCKED";
     gfx_SetColor(C_ORANGE); gfx_FillRectangle(x, y + 1, 5, 5);
     text(kick, x + 9, y, C_ORANGE, 1);
@@ -961,7 +967,7 @@ static void draw_caption(void) {
     if (blind()) { text("SETUP SPOTTED", x, y + 12, C_TEXT, 2); text("BLIND", x, y + 32, C_MUTED, 1); return; }
     char nm[24]; strncpy(nm, s.name, 23); nm[23] = 0;
     for (char *c = nm; *c; c++) if (*c >= 'a' && *c <= 'z') *c -= 32;
-    uint8_t sc = textw(nm, 2) <= 316 - x ? 2 : 1;
+    uint8_t sc = textw(nm, 2) <= PR - 4 - x ? 2 : 1;   /* clear of the price axis */
     text(nm, x, y + 12, up ? C_VUP : C_VDN, sc);
     char w[20]; strcpy(w, up ? "BULLISH " : "BEARISH "); char *o = digits(w + 8, s.conf, 0, 0); *o++ = '%'; *o = 0;
     text(w, x, y + 12 + 8 * sc + 4, C_MUTED, 1);
@@ -1095,11 +1101,20 @@ static int firstHourBar(int first) { /* the first visible bar that opens an hour
     return first + (r ? (3600 - r) / 300 : 0);
 }
 
+/* As the app's drawGrid: solid price lines carried up behind the HUD, and dotted time lines (1 on, 5 off) from the top
+ * to the plot's floor on round clock times at least 72 px apart: at 9 px a 5 minute bar, every hour. */
 static void draw_grid(void) {
     gfx_SetColor(C_GRID);
     for (long g = (gridLoRaw / gridStep + 1) * gridStep; g < gridHiRaw + (gridHiRaw - gridLoRaw) / 2; g += gridStep) {
         int y = Y(vof((float)g));
         if (y >= 0 && y < pb) gfx_HorizLine(0, y, PR);
+    }
+    int first = kf - VIS; if (first < 1) first = 1;
+    for (int i = firstHourBar(first); i < kf + VIS; i += 12) {
+        int x = XI(i);
+        if (x < 0) continue;
+        if (x >= PR) break;
+        for (int y = 0; y < pb; y += 6) gfx_SetPixel(x, y);
     }
 }
 
@@ -1326,9 +1341,23 @@ static void draw_axes(bool live) {
     text_on(price_raw(raw, ts), PR + 6, yt - 3, C_INK, 1, up ? C_GAIN : C_BEAR);
 }
 
+/* The app's floor: volume bars under the candles, the hours along the bottom, the market and timeframe at its right */
+#define VOL_FLOOR 224
+#define VOL_H 26
+static void draw_volume(void) {
+    int first = kf - VIS; if (first < 0) first = 0;
+    int most = 1;
+    for (int i = first; i < kf; i++) { int v = RD16(W.vol, i); if (v > most) most = v; }
+    for (int i = first; i < kf; i++) {
+        int x = XI(i); if (x < -BODY || x > PR) continue;
+        int h = (int)((long)RD16(W.vol, i) * VOL_H / most); if (h < 1) h = 1;
+        gfx_SetColor(BC(i) >= BO(i) ? I_VOLU : I_VOLD);
+        gfx_FillRectangle(x - BODY / 2, VOL_FLOOR - h, BODY, h);
+    }
+}
 static void draw_time_row(void) {
-    gfx_SetColor(C_BG); gfx_FillRectangle(0, PB, PR, 240 - PB);
     int first = kf - VIS; if (first < 1) first = 1;
+    int wt = textw(W.sym, 1) + 5 + textw("5M", 1), xt = PR - 6 - wt;   /* LINK 5M, right */
     for (int i = firstHourBar(first); i <= kf + 12 && i < nbars; i += 12) {
         uint32_t t = W.start + (uint32_t)i * 300;
         int x = XI(i);
@@ -1336,9 +1365,10 @@ static void draw_time_row(void) {
         if (day == 0) { int m, d; civil(t, &m, &d); strcpy(s, MON[m - 1]); }
         else { int hh = (int)(day / 3600); s[0] = '0' + (char)(hh / 10); s[1] = '0' + (char)(hh % 10); s[2] = ':'; s[3] = '0'; s[4] = '0'; s[5] = 0; }
         int w = textw(s, 1);
-        if (x - w / 2 < 4 || x + w / 2 > PR - 8) continue;
-        text(s, x - w / 2, PB + 6, C_TEXT, 1);
+        if (x - w / 2 < 4 || x + w / 2 > xt - 8) continue;
+        text(s, x - w / 2, 228, C_MUTED, 1);
     }
+    text(W.sym, xt, 228, C_TEXT, 1); text("5M", xt + wt - textw("5M", 1), 228, C_MUTED, 1);
 }
 
 /* the ride tag: side and live P&L, riding just above (long) or below (short) the price; the change of side glides */
@@ -1480,51 +1510,63 @@ static char *goal_text(char *o, long t) {
 }
 static void draw_hud(float total, float timeLeft) {
     bool riding = pos.on;
-    int y = 9 + (now_s - kickT < 0.14f ? -3 : 0);
-    char d[24];
-    if (mode == M_CALLIT) { /* points, lives, the streak */
-        text("POINTS", 8, y, C_MUTED, 1);
-        for (uint8_t i = 0; i < 3; i++) { uint8_t c = i < lives ? C_BEAR : C_BORDER; gfx_SetColor(c); gfx_FillCircle(60 + i * 12, y + 2, 2); gfx_FillCircle(64 + i * 12, y + 2, 2); tri(62 + i * 12, y + 3, 4, 4, false, c); }
-        digits(d, (long)rollShown, 0, 0); text_o(d, 8, y + 11, C_TEXT, 3);
-        if (callStreak > 1) { d[0] = 'x'; char *o = digits(d + 1, callStreak, 0, 0); strcpy(o, " STREAK"); text(d, 8, y + 38, C_ORANGE, 1); }
+    int kick = now_s - kickT < 0.14f ? -3 : 0;
+    char d[24], big[24];
+    /* the score plate, top left, as the app's: a side or P&L label, the big number, the round's total under a ride */
+    const char *lab; uint8_t labC, bigC; const char *sub = NULL; char subT[24];
+    if (mode == M_CALLIT) {
+        lab = "POINTS"; labC = C_MUTED; bigC = C_TEXT; digits(big, (long)rollShown, 0, 0);
     } else {
         float value = riding ? openPnl : rollShown, net = riding ? openPnl : (mode == M_BLOWUP ? total - startBank : total);
-        const char *lab = riding ? (pos.dir > 0 ? "LONG" : "SHORT") : mode == M_BLOWUP ? "BANK" : "P&L";
-        text(lab, 8, y, riding ? (pos.dir > 0 ? C_GAIN : C_BEAR) : C_MUTED, 1);
-        int lx = 8 + textw(lab, 1) + 8;
-        if (riding) { strcpy(d, mode == M_BLOWUP ? "BANK " : "TOTAL "); money_to(d + strlen(d), total, false); text(d, lx, y, C_MUTED, 1); lx += textw(d, 1) + 8; }
-        if (mode == M_BLOWUP && !riding) { money_to(d, value, false); if (d[0] == '+') memmove(d, d + 1, strlen(d)); }
-        else money_to(d, value, false);
-        text_o(d, 8, y + 11, net < -0.5f ? C_BEAR : net > 0.5f ? C_BULL : C_TEXT, 3);
-        if (mode == M_SNIPER) for (uint8_t i = 0; i < 3; i++) { gfx_SetColor(i < bullets ? C_TEXT : C_BORDER); gfx_FillRectangle(lx + i * 7, y - 1, 4, 9); }
-        if (mode == M_BLOWUP) { long l10 = (long)(lev * 10); char *o = digits(d, l10 / 10, l10 % 10, 1); strcpy(o, "x LEV"); text(d, 8, y + 38, C_MUTED, 1); }
-        if (combo > 1) { d[0] = 'x'; char *o = digits(d + 1, combo, 0, 0); strcpy(o, " COMBO"); text(d, mode == M_BLOWUP ? 80 : 8, y + 38, C_ORANGE, 1); }
+        lab = riding ? (pos.dir > 0 ? "LONG" : "SHORT") : mode == M_BLOWUP ? "BANK" : "P&L";
+        labC = riding ? (pos.dir > 0 ? C_GAIN : C_BEAR) : C_MUTED;
+        if (mode == M_BLOWUP && !riding) { money_to(big, value, false); if (big[0] == '+') memmove(big, big + 1, strlen(big)); }
+        else money_to(big, value, false);
+        bigC = net < -0.5f ? C_BEAR : net > 0.5f ? C_BULL : C_TEXT;
+        if (riding) { strcpy(subT, mode == M_BLOWUP ? "BANK " : "P&L "); char *q = subT + strlen(subT); money_to(q, total, false); if (mode == M_BLOWUP && *q == '+') memmove(q, q + 1, strlen(q)); sub = subT; }
     }
-    if (stage >= 0 && (lockI < 0 || now_s - lockT > 2.6f)) { /* the stage's goal: stars so far and the next target */
+    int pw = textw(big, 3) + 20; if (pw < 104) pw = 104;
+    if (sub && textw(sub, 1) + 20 > pw) pw = textw(sub, 1) + 20;
+    int ph = sub ? 52 : 42, px = 4, py = 4 + kick;
+    frame(px, py, pw, ph, 6, C_BORDER, C_CARD);
+    text(lab, px + 9, py + 6, labC, 1);
+    if (mode == M_CALLIT) for (uint8_t i = 0; i < 3; i++) { uint8_t c = i < lives ? C_BEAR : C_BORDER; int hx = px + 66 + i * 12, hy = py + 8; gfx_SetColor(c); gfx_FillCircle(hx - 2, hy, 2); gfx_FillCircle(hx + 2, hy, 2); tri(hx, hy + 1, 4, 4, false, c); }
+    if (mode == M_SNIPER) for (uint8_t i = 0; i < 3; i++) { gfx_SetColor(i < bullets ? C_TEXT : C_BORDER); gfx_FillRectangle(px + pw - 30 + i * 7, py + 5, 4, 9); }
+    text_o(big, px + 9, py + 18, bigC, 3);
+    if (sub) text(sub, px + 9, py + 41, C_MUTED, 1);
+    /* what the plate does not hold, under it: the streak, the combo, Blow-Up's leverage */
+    int ly = py + ph + 5;
+    if (mode == M_CALLIT && callStreak > 1) { d[0] = 'x'; char *o = digits(d + 1, callStreak, 0, 0); strcpy(o, " STREAK"); text(d, px + 4, ly, C_ORANGE, 1); }
+    if (combo > 1) { d[0] = 'x'; char *o = digits(d + 1, combo, 0, 0); strcpy(o, " COMBO"); text(d, px + 4, ly, C_ORANGE, 1); }
+
+    /* the mode and the clock, top right, as the app's pill; its orange line runs down with the time (Blow-Up: the
+     * leverage, which only climbs) */
+    {
+        const char *mn = stage >= 0 ? "CAREER" : MODE_NAME[mode];
+        if (mode == M_BLOWUP) { long l10 = (long)(lev * 10); char *o = digits(d, l10 / 10, l10 % 10, 1); strcpy(o, "x"); }
+        else { int sl = timeLeft > 0 ? (int)(timeLeft + 0.99f) : 0; d[0] = (char)('0' + sl / 60); d[1] = ':'; d[2] = (char)('0' + (sl % 60) / 10); d[3] = (char)('0' + sl % 10); d[4] = 0; }
+        int wm = textw(mn, 1) + 18, wc = textw("0:00", 1) + 18, w = wm + wc, x = 316 - w, y = 4;
+        frame(x, y, w, 21, 5, C_BORDER, C_CARD);
+        gfx_SetColor(C_BORDER); gfx_VertLine(x + wm, y + 1, 19);
+        text_c(mn, x + wm / 2, y + 7, C_TEXT, 1);
+        bool low = mode != M_BLOWUP && timeLeft <= 15;
+        if (low) seta(D_CLOCK, RGB_BEAR, 0.7f + 0.3f * sin_f(now_s * 6.2832f));
+        text_c(d, x + wm + wc / 2, y + 7, low ? D_CLOCK : C_TEXT, 1);
+        float frac = mode == M_BLOWUP ? lev / 20 : timeLeft / (stage >= 0 ? (float)CAREER[stage].secs : ROUND_SECS);
+        if (frac < 0) frac = 0; if (frac > 1) frac = 1;
+        gfx_SetColor(low ? D_CLOCK : C_ORANGE); gfx_FillRectangle(x + 4, y + 23, (int)((w - 8) * frac), 2);
+    }
+    if (stage >= 0 && (lockI < 0 || now_s - lockT > 2.6f)) { /* the stage's goal under the pill: stars so far and the next target */
         uint8_t got = stars_for(stage_value(riding ? openPnl : 0));
         char g[24]; strcpy(g, "STAGE "); digits(g + 6, stage + 1, 0, 0);
-        text_r(g, 262, y, C_MUTED, 1);
-        for (int i = 0; i < 3; i++) star(226 + i * 12, y + 11, i < got ? C_ORANGE : C_BORDER);
-        if (got < 3) { goal_text(g, CAREER[stage].stars[got]); text_r(g, 262, y + 23, C_TEXT, 1); }
-    }
-    if (labTop > 20 && (lockI < 0 || (now_s - lockT > 2.6f && !callOn))) { /* the ticker being played, top right on the label row; a pattern caption takes the corner while it shows */
-        int w2 = textw("5M", 1);
-        text_r("5M", 312, 9, C_MUTED, 1);
-        text_r(W.sym, 312 - w2 - 5, 9, C_TEXT, 1);
-    }
-    /* the bar across the top: the time left (red in the last 15 s); Blow-Up's leverage, which only climbs */
-    gfx_SetColor(C_BORDER); gfx_FillRectangle(0, 0, 320, 3);
-    if (mode == M_BLOWUP) { gfx_SetColor(C_ORANGE); gfx_FillRectangle(0, 0, (int)(320 * lev / 20), 3); }
-    else {
-        bool low = timeLeft <= 15;
-        float frac = timeLeft / ROUND_SECS; if (frac < 0) frac = 0;
-        if (low) seta(D_CLOCK, RGB_BEAR, 0.7f + 0.3f * sin_f(now_s * 6.2832f));
-        gfx_SetColor(low ? D_CLOCK : C_ORANGE); gfx_FillRectangle(0, 0, (int)(320 * frac), 3);
+        text_r(g, 316, 32, C_MUTED, 1);
+        for (int i = 0; i < 3; i++) star(284 + i * 12, 43, i < got ? C_ORANGE : C_BORDER);
+        if (got < 3) { goal_text(g, CAREER[stage].stars[got]); text_r(g, 316, 55, C_TEXT, 1); }
     }
     /* the keys, until the first ride */
     if (introT <= 0 && !rode && mode != M_CALLIT) {
         bool sh = shorts();
-        int w = textw(K_GO, 1) + (sh ? textw(" - " K_SHORT, 1) + 42 : 30), x = PR / 2 - w / 2, py = PB - 20;
+        int w = textw(K_GO, 1) + (sh ? textw(" - " K_SHORT, 1) + 42 : 30), x = PR / 2 - w / 2, py = VOL_FLOOR - 36;
         frame(x, py, w, 16, 4, C_BORDER, C_CARD);
         text(K_GO, x + 10, py + 4, C_TEXT, 1);
         int a = x + 10 + textw(K_GO, 1) + 4;
@@ -1721,6 +1763,48 @@ static void wordmark(int x, int y) {
     text("RUSH", x + textw("SETUP ", 2), y, C_ORANGE, 2);
 }
 
+/* the menu's market tape, as the app's: every market in the pack, its last price and its move over the recorded window */
+typedef struct { char sym[9], px[14], pct[10]; int8_t up; int w; } Tape;
+#define MAXTAPE 16
+static Tape tapeE[MAXTAPE]; static uint8_t tapeN; static int tapeW;
+static void tape_prep(void) {
+    tapeN = 0; tapeW = 0;
+    for (uint8_t i = 0; i < nwin && tapeN < MAXTAPE; i++) {
+        const uint8_t *p = winp[i]; char sym[9]; memcpy(sym, p, 8); sym[8] = 0;
+        bool dup = false; for (uint8_t j = 0; j < tapeN; j++) if (!strcmp(tapeE[j].sym, sym)) dup = true;
+        if (dup) continue;
+        Tape *e = &tapeE[tapeN++]; strcpy(e->sym, sym);
+        long lo = (long)(int32_t)rd32(p + 12); float span = (float)rd32(p + 16); uint8_t dec = p[20];
+        const uint8_t *oh = p + WHDR;
+        float first = (float)lo + RD16(oh, 0) * span / 65535.0f, last = (float)lo + RD16(oh, (nbars - 1) * 4 + 3) * span / 65535.0f;
+        long raw = (long)(last + 0.5f); if (dec > 4) { raw = (raw + 50) / 100; dec -= 2; }
+        digits(e->px, raw / P10[dec], raw % P10[dec], dec);
+        long c10 = first > 0 ? (long)((last - first) * 1000.0f / first) : 0; e->up = c10 >= 0;
+        if (c10 < 0) c10 = -c10;
+        char *o = digits(e->pct, c10 / 10, c10 % 10, 1); *o++ = '%'; *o = 0;
+        e->w = textw(e->sym, 1) + 5 + textw(e->px, 1) + 5 + 9 + textw(e->pct, 1) + 16;
+        tapeW += e->w;
+    }
+}
+static void draw_tape(int y) {
+    if (!tapeN) return;
+    gfx_SetColor(C_BG); gfx_FillRectangle(0, y - 5, 320, 17);
+    gfx_SetColor(C_BORDER); gfx_HorizLine(0, y - 6, 320); gfx_HorizLine(0, y + 12, 320);
+    int x = -((int)(now_s * 22) % tapeW);
+    txtClip = true;
+    for (uint8_t n = 0; x < 320; n = (uint8_t)((n + 1) % tapeN)) {
+        const Tape *e = &tapeE[n];
+        if (x + e->w > 0) {
+            int cx = x;
+            text(e->sym, cx, y, C_TEXT, 1); cx += textw(e->sym, 1) + 5;
+            text(e->px, cx, y, C_MUTED, 1); cx += textw(e->px, 1) + 5;
+            mark(cx, y + 1, e->up, e->up ? C_BULL : C_BEAR); cx += 9;
+            text(e->pct, cx, y, e->up ? C_BULL : C_BEAR, 1);
+        }
+        x += e->w;
+    }
+    txtClip = false;
+}
 static const char *const MODE_DESC[NMODES] = { "SAME CHART FOR EVERYONE TODAY", "LONG ONLY - RIDE THE GREEN SETUPS", "LONG OR SHORT - 1:00",
     "3 BULLETS - TRIPLE SIZE", "CALL THE SETUP - 3 LIVES", "ENDLESS - LEVERAGE CLIMBS" };
 static uint8_t menuI = M_PRO, stSel;
@@ -1730,6 +1814,7 @@ static bool menu(uint8_t *sel) {
     bool hasCareer = nwin >= NPRACTICE + NSTAGE;
     uint8_t nitems = hasCareer ? NMODES + 3 : NMODES + 2, shopI = (uint8_t)(nitems - 2), missI = (uint8_t)(nitems - 1);
     missions_today(today());
+    if (!tapeN) tape_prep();
     static uint8_t shopSel;
     uint8_t free_sel = (uint8_t)(today() % nprac);
     if (*sel >= nprac) *sel = 0;
@@ -1777,6 +1862,7 @@ static bool menu(uint8_t *sel) {
         gfx_FillScreen(C_BG);
         draw_grid(); draw_candles(false); draw_axes(true);
         wordmark(10, 12);
+        draw_tape(130);
         /* the mode or the Career stage: its name, what it is, its best or its stars; up and down change it */
         frame(6, 150, 258, 40, 6, C_BORDER, C_CARD);
         tri(18, 156, 4, 5, true, C_MUTED); tri(18, 178, 4, 5, false, C_MUTED);
@@ -2033,7 +2119,7 @@ static bool play(uint8_t sel, float *out_total) {
 #define T_(i)
 #endif
         gfx_FillScreen(C_BG); T_(1)
-        draw_grid(); T_(2)
+        draw_grid(); draw_volume(); T_(2)
         { int f0 = kf - VIS; if (f0 < 1) f0 = 1; ind_back(f0, kf - 1); }
         draw_risk();
         draw_exits(true);
@@ -2046,7 +2132,7 @@ static bool play(uint8_t sel, float *out_total) {
         draw_marks();
         draw_reticle();
         ox = oy = 0;
-        draw_axes(true); T_(5)
+        draw_axes(true); draw_time_row(); T_(5)
         T_(6)
         draw_ride_tag(dt);
         draw_floaters();
@@ -2085,67 +2171,117 @@ static bool results(uint8_t sel, float total, bool record) {
         now_s = clock_s();
         { /* the web's Results beats: the result stamps in, then each star, a record, a level up */
             if (rT0 < 0) rT0 = now_s;
-            float rt = now_s - rT0, net0 = mode == M_BLOWUP ? total - startBank : total;
-            if (beat == 0 && rt >= 0.52f) { beat = 1; SFX(SFX_STAMP, net0 >= -0.5f); }
-            if (beat >= 1 && beat <= 3 && stage >= 0 && beat - 1 < runStars && rt >= 0.87f + 0.14f * (beat - 1)) { SFX(SFX_RIGHT, beat); beat++; }
-            else if (beat >= 1 && beat < 4 && (stage < 0 || beat - 1 >= runStars) && rt >= 0.87f) beat = 4;
-            if (beat == 4 && rt >= 1.17f) { beat = 5; if (record) SFX(SFX_BIG, 1); }
-            if (beat == 5 && rt >= 1.35f) { beat = 6; if (level_of(xp) > lvBefore) SFX(SFX_BIG, 1 + level_of(xp) - lvBefore > 4 ? 4 : 1 + level_of(xp) - lvBefore); }
+            float rt0 = now_s - rT0, net0 = mode == M_BLOWUP ? total - startBank : total;
+            if (beat == 0 && rt0 >= 0.52f) { beat = 1; SFX(SFX_STAMP, net0 >= -0.5f); }
+            if (beat >= 1 && beat <= 3 && stage >= 0 && beat - 1 < runStars && rt0 >= 0.87f + 0.14f * (beat - 1)) { SFX(SFX_RIGHT, beat); beat++; }
+            else if (beat >= 1 && beat < 4 && (stage < 0 || beat - 1 >= runStars) && rt0 >= 0.87f) beat = 4;
+            if (beat == 4 && rt0 >= 1.17f) { beat = 5; if (record) SFX(SFX_BIG, 1); }
+            if (beat == 5 && rt0 >= 1.35f) { beat = 6; if (level_of(xp) > lvBefore) SFX(SFX_BIG, 1 + level_of(xp) - lvBefore > 4 ? 4 : 1 + level_of(xp) - lvBefore); }
         }
+        float rt = now_s - rT0;
         gfx_FillScreen(C_BG);
-        draw_grid(); draw_candles(true); draw_axes(false);
         float net = mode == M_BLOWUP ? total - startBank : total;
-        frame(14, 16, 236, 170, 8, net < -0.5f ? C_EDGEDN : net > 0.5f ? C_EDGEUP : C_BORDER, C_CARD);
+        bool win = mode == M_CALLIT ? total > 0 : net > 0.5f, loss = mode != M_CALLIT && net < -0.5f;
         char line[40], *o;
-        strcpy(line, MODE_NAME[mode]); strcat(line, " - "); strcat(line, W.sym);
-        text(line, 28, 28, C_MUTED, 1);
-        text_r(date(W.start), 236, 28, C_MUTED, 1);
+        /* the run: mode, market, day */
+        strcpy(line, stage >= 0 ? "CAREER" : MODE_NAME[mode]); strcat(line, "  "); strcat(line, W.sym); strcat(line, "  "); strcat(line, date(W.start));
+        text(line, 14, 10, C_MUTED, 1);
+        /* the verdict chip, then the number between corner brackets: it stamps in on the beat */
+        {
+            const char *v = mode == M_CALLIT ? "SCORE" : win ? "PROFIT" : loss ? "LOSS" : "FLAT";
+            int w = textw(v, 1) + (mode == M_CALLIT || (!win && !loss) ? 12 : 22);
+            rr(14, 24, w, 14, 3, C_TEXT);
+            txtBg = C_TEXT; text(v, 20, 28, C_INK, 1); txtBg = C_BG;
+            if (mode != M_CALLIT && (win || loss)) mark(20 + textw(v, 1) + 5, 29, win, C_INK);
+        }
+        int bx0 = 12, bx1 = 204, by0 = 44, by1 = 98;
+        gfx_SetColor(C_MUTED);
+        gfx_HorizLine(bx0, by0, 9); gfx_VertLine(bx0, by0, 9); gfx_HorizLine(bx1 - 9, by0, 10); gfx_VertLine(bx1, by0, 9);
+        gfx_HorizLine(bx0, by1, 9); gfx_VertLine(bx0, by1 - 8, 9); gfx_HorizLine(bx1 - 9, by1, 10); gfx_VertLine(bx1, by1 - 8, 9);
         if (mode == M_CALLIT) { o = digits(line, (long)total, 0, 0); strcpy(o, " PTS"); }
         else { money_to(line, total, false); if (mode == M_BLOWUP && line[0] == '+') memmove(line, line + 1, strlen(line)); }
-        text(line, 28, 48, mode == M_CALLIT ? C_TEXT : net < -0.5f ? C_BEAR : C_TEXT, 4);
-        if (mode == M_CALLIT) {
-            o = line; strcpy(o, "CALLS "); o = digits(o + 6, callsRight, 0, 0); *o++ = '/'; o = digits(o, callsN, 0, 0);
-            strcpy(o, "   BEST STREAK x"); digits(o + 16, bestCall, 0, 0);
-            text(line, 28, 94, C_TEXT, 1);
-        } else {
-            o = line; strcpy(o, "RIDES "); o = digits(o + 6, rides, 0, 0);
-            strcpy(o, "   WON "); o = digits(o + 7, wins, 0, 0);
-            if (liqs) { strcpy(o, "   LIQ "); digits(o + 7, liqs, 0, 0); }
-            text(line, 28, 94, C_TEXT, 1);
-            o = line; strcpy(o, "READS "); o = digits(o + 6, reads, 0, 0);
-            if (bestCombo > 1) { strcpy(o, "   BEST COMBO x"); digits(o + 15, bestCombo, 0, 0); }
-            text(line, 28, 108, C_MUTED, 1);
-            if (mode == M_BLOWUP) {
-                o = line; strcpy(o, "PEAK "); o = money_to(o + 5, peakBank, false);
-                int sec = (int)elapsed; strcpy(o, "   SURVIVED "); o += 12; *o++ = (char)('0' + sec / 600); *o++ = (char)('0' + (sec / 60) % 10); *o++ = ':'; *o++ = (char)('0' + (sec % 60) / 10); *o++ = (char)('0' + sec % 10); *o = 0;
-                text(line, 28, 122, C_MUTED, 1);
-                if (bank < 1000) text("BLOWN UP", 28, 140, C_BEAR, 2);
+        if (rt >= 0.45f) {
+            int jolt = rt < 0.52f ? -4 : rt < 0.6f ? 2 : 0;   /* the stamp: drops a touch, lands */
+            text_c(line, (bx0 + bx1) / 2, 57 + jolt, mode == M_CALLIT ? C_TEXT : loss ? C_BEAR : C_TEXT, 4);
+        }
+        /* the rides (or calls) as squares: won lit, the rest dim; they fill in one after another */
+        {
+            int n = mode == M_CALLIT ? callsN : rides, good = mode == M_CALLIT ? callsRight : wins;
+            if (n > 16) { good = good * 16 / n; n = 16; }
+            int shown = rt < 0.87f ? 0 : (int)((rt - 0.87f) / 0.06f) + 1;
+            int sx = (bx0 + bx1) / 2 - (n * 12 - 3) / 2;
+            for (int q = 0; q < n && q < shown; q++) {
+                gfx_SetColor(q < good ? C_TEXT : C_BORDER);
+                gfx_FillRectangle(sx + q * 12, 106, 9, 9);
+            }
+            if (n) {
+                o = line; o = digits(o, good, 0, 0); strcpy(o, mode == M_CALLIT ? " RIGHT   " : " WON   "); o += strlen(o);
+                o = digits(o, n - good, 0, 0); strcpy(o, mode == M_CALLIT ? " WRONG" : " MISSED");
+                text_c(line, (bx0 + bx1) / 2, 121, C_MUTED, 1);
+            } else text_c("NO RIDES", (bx0 + bx1) / 2, 121, C_MUTED, 1);
+        }
+        /* the numbers, a column on the right */
+        frame(214, 24, 102, 116, 6, C_BORDER, C_CARD);
+        {
+            char v[3][16]; const char *lab[3];
+            if (mode == M_CALLIT) {
+                o = digits(v[0], callsRight, 0, 0); *o++ = '/'; digits(o, callsN, 0, 0); lab[0] = "CALLS";
+                v[1][0] = 'x'; digits(v[1] + 1, bestCall, 0, 0); lab[1] = "STREAK";
+                digits(v[2], reads, 0, 0); lab[2] = "READS";
+            } else if (mode == M_BLOWUP) {
+                money_to(v[0], peakBank, false); if (v[0][0] == '+') memmove(v[0], v[0] + 1, strlen(v[0])); lab[0] = "PEAK";
+                int sec = (int)elapsed; o = v[1]; *o++ = (char)('0' + sec / 600); *o++ = (char)('0' + (sec / 60) % 10); *o++ = ':'; *o++ = (char)('0' + (sec % 60) / 10); *o++ = (char)('0' + sec % 10); *o = 0; lab[1] = "SURVIVED";
+                o = digits(v[2], wins, 0, 0); *o++ = '/'; digits(o, rides, 0, 0); lab[2] = "WON";
+            } else {
+                o = digits(v[0], wins, 0, 0); *o++ = '/'; digits(o, rides, 0, 0); lab[0] = "WON";
+                digits(v[1], reads, 0, 0); lab[1] = "READS";
+                if (liqs) { digits(v[2], liqs, 0, 0); lab[2] = "LIQ"; } else { v[2][0] = 'x'; digits(v[2] + 1, bestCombo > 1 ? bestCombo : 0, 0, 0); lab[2] = "COMBO"; }
+            }
+            for (int r = 0; r < 3; r++) {
+                int ry = 30 + r * 37;
+                if (r) { gfx_SetColor(C_BORDER); gfx_HorizLine(222, ry - 5, 86); }
+                text(v[r], 224, ry, mode == M_BLOWUP && r == 0 && bank < 1000 ? C_BEAR : C_TEXT, 2);
+                text(lab[r], 224, ry + 22, C_MUTED, 1);
             }
         }
-        if (stage >= 0) {
-            for (int i = 0; i < 3; i++) star(34 + i * 14, 146, i < runStars ? C_ORANGE : C_BORDER);
-            if (runStars > prevStars) text("NEW STAR", 80, 146, C_ORANGE, 1);
-            else if (runStars < 3) { char g[24]; strcpy(g, "NEXT "); goal_text(g + 5, CAREER[stage].stars[runStars]); text(g, 80, 146, C_MUTED, 1); }
+        /* the level: its number, the rank, the XP this run earned, the bar filling from where it was */
+        frame(12, 138, 192, 48, 6, C_BORDER, C_CARD);
+        {
+            int lv = level_of(xp); char g[32];
+            frame(20, 144, 30, 37, 4, C_BORDER, C_BG);
+            digits(g, lv, 0, 0); text_c(g, 35, 149, C_TEXT, 2);
+            text_c("LV", 35, 171, C_MUTED, 1);
+            text(lv > lvBefore ? "LEVEL UP" : rank_of(lv), 58, 148, lv > lvBefore ? C_ORANGE : C_TEXT, 2);
+            if (lv > lvBefore) text_r(rank_of(lv), 196, 152, C_TEXT, 1);
+            else if (runXp > 0) { g[0] = '+'; o = digits(g + 1, runXp, 0, 0); strcpy(o, " XP"); text_r(g, 196, 152, C_ORANGE, 1); }
+            unsigned long lo = LEVEL_XP[lv - 1], hi = LEVEL_XP[lv < 120 ? lv : 120];
+            float fill = rt < 1.17f ? 0 : rt > 1.6f ? 1 : (rt - 1.17f) / 0.43f;
+            unsigned long from = xp > (unsigned long)runXp ? xp - (unsigned long)runXp : 0, at = from + (unsigned long)((float)(xp - from) * fill);
+            if (at < lo) at = lo;
+            int bw = 140, f = hi > lo ? (int)((at - lo) * bw / (hi - lo)) : bw;
+            gfx_SetColor(C_BORDER); gfx_FillRectangle(58, 171, bw - 2, 3);
+            gfx_SetColor(C_ORANGE); gfx_FillRectangle(58, 171, f > bw - 2 ? bw - 2 : f, 3);
         }
-        if (msJust) { /* the day's missions this run finished */
-            int row = 0;
-            for (uint8_t i = 0; i < 3; i++) if (msJust & (1 << i)) { text("MISSION  +60 XP", 28, 124 + row * 10, C_ORANGE, 1); row++; }
-            if (msJust & 8) text("ALL 3 MISSIONS  +120 XP", 28, 124 + row * 10, C_ORANGE, 1);
+        /* under the numbers: a record, the best, the stage's stars, a finished mission */
+        {
+            int ry = 150;
+            if (stage >= 0) {
+                for (int i = 0; i < 3; i++) star(226 + i * 14, ry, i < runStars && rt >= 0.87f + 0.14f * i ? C_ORANGE : C_BORDER);
+                if (runStars > prevStars) text("NEW STAR", 226, ry + 14, C_ORANGE, 1);
+                else if (runStars < 3) { char g[24]; strcpy(g, "NEXT "); goal_text(g + 5, CAREER[stage].stars[runStars]); text(g, 226, ry + 14, C_MUTED, 1); }
+                ry += 28;
+            }
+            if (record && rt >= 1.17f) text("NEW BEST", 226, ry, C_ORANGE, 1);
+            else if (!record && (hasM & (1 << mode))) {
+                text("BEST", 226, ry, C_MUTED, 1);
+                if (mode == M_CALLIT) { o = digits(line, (long)bestM[mode], 0, 0); strcpy(o, " PTS"); } else money_to(line, bestM[mode], false);
+                text(line, 226, ry + 11, C_TEXT, 1);
+            }
+            if (msJust && stage < 0) text(msJust & 8 ? "ALL 3 MISSIONS" : "MISSION DONE", 226, ry + 26, C_ORANGE, 1);
         }
-        if (runXp > 0) {
-            char g[32]; g[0] = '+'; char *o = digits(g + 1, runXp, 0, 0); strcpy(o, " XP");
-            int lv = level_of(xp); text_r(g, 236, 164, C_ORANGE, 1);
-            if (lv > lvBefore) { strcpy(g, "LEVEL "); o = digits(g + 6, lv, 0, 0); *o++ = ' '; strcpy(o, rank_of(lv)); text_r(g, 236, 150, C_TEXT, 1); }
-        }
-        if (record) text("NEW BEST", 28, 164, C_ORANGE, 1);
-        else if (hasM & (1 << mode)) {
-            text("BEST", 28, 164, C_MUTED, 1);
-            if (mode == M_CALLIT) { o = digits(line, (long)bestM[mode], 0, 0); strcpy(o, " PTS"); } else money_to(line, bestM[mode], false);
-            text(line, 66, 164, C_MUTED, 1);
-        }
-        frame(6, 196, 160, 26, 6, C_BORDER, C_CARD);
-        text(K_BACK "  MENU", 18, 205, C_MUTED, 1);
-        keycap(176, 199, 88, "AGAIN");
+        frame(12, 198, 120, 26, 6, C_BORDER, C_CARD);
+        text(K_BACK "  MENU", 24, 207, C_MUTED, 1);
+        keycap(144, 200, 172, "AGAIN");
         present();
     }
 }
