@@ -18,6 +18,16 @@ typedef struct SrRaw {
 void sr_input_scan(uint8_t kb[8]);
 void sr_overlay(void);
 
+/* ---- sound: the web game's effects (fx.js), by name; the game calls SFX(id, arg) ---- */
+enum { SFX_TAP, SFX_CANDLE, SFX_LOCK, SFX_OPEN, SFX_FLIP, SFX_WIN, SFX_BIG, SFX_LOSS, SFX_LIQ, SFX_RIGHT, SFX_WRONG,
+       SFX_TICK, SFX_DING, SFX_COUNT, SFX_COMBO, SFX_CLINK, SFX_STAMP, SFX_COLLECT };
+#define SR_AUDIO_RATE 22050
+#ifndef SR_AUDIO_GAIN
+#define SR_AUDIO_GAIN 3.0f   /* the speaker is small: fx.js's levels, lifted (the mix is clipped at full scale) */
+#endif
+void sr_sfx(int id, int arg);
+void sr_audio_render(int16_t *out, int n);  /* mono, SR_AUDIO_RATE */
+
 /* ---- the platform: set by the firmware (or the desktop harness) before srush_main() ---- */
 typedef struct {
     uint16_t *fb;                                  /* 320 x 240 RGB565, row-major */

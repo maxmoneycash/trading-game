@@ -46,6 +46,11 @@ static void present(const uint16_t *f)
             fclose(o);
         }
     }
+    { /* 33 ms of sound per frame, appended to OUTDIR/audio.raw (s16 mono, 22050 Hz) */
+        static FILE *af; int16_t buf[728];
+        if (!af) { char path[512]; snprintf(path, sizeof path, "%s/audio.raw", outdir); af = fopen(path, "wb"); }
+        sr_audio_render(buf, 728); fwrite(buf, 2, 728, af); fflush(af);
+    }
     frame_no++; if (nev && now_ms > ev[nev - 1].t + 500) { printf("done after %d frames\n", frame_no); exit(0); }
     now_ms += 33;
 }

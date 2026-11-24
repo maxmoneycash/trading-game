@@ -140,6 +140,12 @@ static void palette(void) {
 #define K_OK "ENTER"
 #define K_BACK "CLEAR"
 #endif
+/* sound: the T-Deck plays the web game's effects (fx.js) at the same moments; the calculator has no speaker */
+#ifdef SR_TDECK
+#define SFX(id, arg) sr_sfx(id, arg)
+#else
+#define SFX(id, arg) ((void)0)
+#endif
 #define WHDR 22
 static const uint8_t *winp[MAXW];
 static uint8_t nwin, lead;
@@ -460,7 +466,7 @@ static const char *const MODE_NAME[NMODES] = { "FREE RUN", "RUSH", "PRO", "SNIPE
 static uint8_t mode = M_PRO;
 static uint8_t bullets, lives, callStreak, bestCall, callsRight, callsN;
 static float bank, startBank, peakBank, lev, points;
-static bool callOn; static float callLeft; static const char *callTag; static float callTagT; static int callFastUntil = -1, callI = -1;
+static bool callOn; static float callLeft; static int callTick = -1; static const char *callTag; static float callTagT; static int callFastUntil = -1, callI = -1;
 #define CALL_SECONDS 3.5f
 /* Career (core.js CAREER): fixed charts that drill their own setups; stars at three targets (the first halved, as the
  * phone does since the one-minute rounds; Survivor's first is halfway from the bank) */
@@ -971,6 +977,7 @@ static void openPos(int8_t dir) {
     if (pos.on) return;
     if (mode == M_SNIPER) { if (!bullets) return; bullets--; if (!bullets) floater("LAST BULLET", floatX(), PT + 60, C_ORANGE, false, false); }
     pos.on = true; pos.dir = dir; pos.entryQ = kq; pos.entry = fc; pos.entryRaw = rawp(fc); pos.t0 = now_s;
+    SFX(SFX_OPEN, dir);
     /* the size: $25,000 (Sniper triples it); Blow-Up rides its bank at the leverage reached, liquidating at -80% of it */
     pos.bankAtOpen = bank;
     pos.notional = mode == M_BLOWUP ? (float)(long)(bank * lev) : mode == M_SNIPER ? 3 * NOTIONAL : NOTIONAL;
@@ -1017,12 +1024,14 @@ static void closePos(uint8_t reason) { /* 0 release, 1 flip, 2 liq, 3 end */
     if (good && pos.dir < 0) shortWins++;
     if (good && pos.worst <= COMEBACK_USD) comebacks++;
     if (reason == 2) {
-        shake = 9; hit = 0.16f; flashA = 1; flashCol = RGB_BEAR;
+        shake = 9; hit = 0.16f; flashA = 1; flashCol = RGB_BEAR; SFX(SFX_LIQ, 0);
         add_mark(0, C_BEAR, "LIQUIDATED", 1.6f)->v = price;
         char l[28]; strcpy(l, "LIQUIDATED "); strcat(l, m);
         floater(l, floatX(), rise(y, 0), C_BEAR, true, true);
     } else if (good) {
         bool big = pnl > 1200;
+        SFX(big ? SFX_BIG : SFX_WIN, combo);
+        if (read && combo >= 3) SFX(SFX_COMBO, combo);
         shake = 2 + pnl / 400; if (shake > 8) shake = 8;
         hit = big ? 0.12f : 0.05f + (pnl / 20000 < 0.05f ? pnl / 20000 : 0.05f);
         if (big && slowmo < 0.45f) slowmo = 0.45f;
@@ -1036,7 +1045,7 @@ static void closePos(uint8_t reason) { /* 0 release, 1 flip, 2 liq, 3 end */
         if (read && combo >= 2) { char st[16]; st[0] = 'x'; char *o = digits(st + 1, combo, 0, 0); strcpy(o, " COMBO"); floater(st, floatX(), fy - (comeback ? 76 : 38), C_ORANGE, combo >= 3, false); }
         Mark *b = add_mark(2, C_TEXT, "", 0.5f); b->q0 = kq; b->v0 = price;
     } else {
-        shake = 4; hit = 0.04f; flashA = 0.35f; flashCol = RGB_BEAR;
+        shake = 4; hit = 0.04f; flashA = 0.35f; flashCol = RGB_BEAR; SFX(SFX_LOSS, 0);
         floater(m, floatX(), rise(y, 0), C_BEAR, false, true);
     }
     /* near miss: after 8 candles, say if the move kept going */
@@ -1733,12 +1742,14 @@ static bool menu(uint8_t *sel) {
             if (pressed(7, kb_Left)) *sel = (uint8_t)((*sel + nprac - 1) % nprac);
         }
         bool go = pressed(6, kb_Enter) || pressed(1, kb_2nd);
+        if (go || pressed(7, kb_Up) || pressed(7, kb_Down) || pressed(7, kb_Left) || pressed(7, kb_Right)) SFX(SFX_TAP, 0);
         latch();
         uint8_t w = career ? (uint8_t)(NPRACTICE + stSel) : menuI == M_FREE ? free_sel : *sel;
         bool open = !career || stage_open(stSel);
         if (go && shop) { /* the Shop: equip what you own, buy what you can afford */
             if (owned & (1 << shopSel)) themeI = shopSel;
-            else if (cash >= THEMES[shopSel].price) { cash -= THEMES[shopSel].price; owned |= (uint16_t)(1 << shopSel); themeI = shopSel; flashA = 0; }
+            else if (cash >= THEMES[shopSel].price) { cash -= THEMES[shopSel].price; owned |= (uint16_t)(1 << shopSel); themeI = shopSel; flashA = 0; SFX(SFX_WIN, 1); }
+            else SFX(SFX_WRONG, 0);
             save_save(); go = false;
         }
         if (miss) go = false;
@@ -1823,11 +1834,11 @@ static void answer(int8_t dir) {
         int pts = 100 + 50 * (callStreak - 1); points += pts;
         char t[12]; t[0] = '+'; digits(t + 1, pts, 0, 0);
         floater(t, floatX(), PT + 70, C_TEXT, true, false); kickT = now_s;
-        callTag = "CALLED IT";
+        callTag = "CALLED IT"; SFX(SFX_RIGHT, callStreak);
     } else {
         callStreak = 0; if (lives) lives--; shake = 5; flashA = 0.5f; flashCol = RGB_BEAR;
         floater(dir == 0 ? "TOO SLOW" : "WRONG WAY", floatX(), PT + 70, C_BEAR, true, false);
-        callTag = "MISSED";
+        callTag = "MISSED"; SFX(SFX_WRONG, 0);
     }
     lockT = now_s; /* the caption names it now */
     callFastUntil = st.at + 12;
@@ -1880,18 +1891,19 @@ static bool play(uint8_t sel, float *out_total) {
                     if (L && !prevL) answer(1);
                     else if (D && !prevD) answer(-1);
                     else if ((callLeft -= dt) <= 0) answer(0);
+                    else { int tk = ceil_i(callLeft * 2); if (tk != callTick) { callTick = tk; SFX(SFX_TICK, 0); } }
                 } else if ((L && !prevL) || (D && !prevD)) { tempo += 3.2f; if (tempo > 18) tempo = 18; }
             } else {
                 /* the press: a fresh key starts it; held past 170 ms it rides; a slide flips; the release closes */
                 if (lockout && !L && !D) lockout = false;
                 if (!press.on && !lockout) {
-                    if (L && !prevL) { press.on = true; press.forced = false; press.t = now_s; press.dir = D ? -1 : 1; }
-                    else if (D && !prevD) { press.on = true; press.forced = true; press.t = now_s; press.dir = -1; }
+                    if (L && !prevL) { press.on = true; press.forced = false; press.t = now_s; press.dir = D ? -1 : 1; SFX(SFX_TAP, 0); }
+                    else if (D && !prevD) { press.on = true; press.forced = true; press.t = now_s; press.dir = -1; SFX(SFX_TAP, 0); }
                 }
                 if (press.on) {
                     if (!press.forced && shorts()) {
                         int8_t want = D ? -1 : 1;
-                        if (want != press.dir) { press.dir = want; if (pos.on) { closePos(1); openPos(want); } }
+                        if (want != press.dir) { press.dir = want; if (pos.on) { closePos(1); openPos(want); SFX(SFX_FLIP, 0); } }
                     }
                     if (!(press.forced ? D : L)) {
                         press.on = false;
@@ -1920,7 +1932,7 @@ static bool play(uint8_t sel, float *out_total) {
             if (k > nbars - 0.002f) k = nbars - 0.002f;
             elapsed += dt;
             frame_prep();
-            if (kf > pk) { closeI = kf - 1; closeT = now_s; }
+            if (kf > pk) { closeI = kf - 1; closeT = now_s; SFX(SFX_CANDLE, 0); }
             for (; evDone < kf - 1; evDone++) { /* an indicator event that just printed pops */
                 int b = evDone + 1;
                 if (preset == 2 && b > 0 && sdir[b] != sdir[b - 1]) {
@@ -1937,7 +1949,7 @@ static bool play(uint8_t sel, float *out_total) {
                     Setup st; get_setup(i, &st);
                     if (st.at > kd) break;
                     if (st.at >= kd - 2 && !locked[i] && !callOn) {
-                        locked[i] = 1; lockI = i; lockT = now_s; callTag = NULL;
+                        locked[i] = 1; lockI = i; lockT = now_s; callTag = NULL; SFX(SFX_LOCK, 0);
                         slowmo = 1.1f; shake = shake > 2 ? shake : 2;
                         if (mode == M_CALLIT) { callOn = true; callLeft = CALL_SECONDS; callI = i; }
                     }
@@ -1966,12 +1978,12 @@ static bool play(uint8_t sel, float *out_total) {
                         pos.rung = (uint8_t)rung;
                         int at = pos.entry + pos.dir * rung * risk;
                         char t[24]; strcpy(t, rung == 2 ? "TARGET " : rung < 2 ? "HALFWAY " : "PAST TARGET "); money_to(t + strlen(t), ridePnl(at), false);
-                        add_mark(0, C_TEXT, t, 1.3f)->v = at;
+                        add_mark(0, C_TEXT, t, 1.3f)->v = at; SFX(SFX_DING, rung - 1);
                     }
                     if (!pos.broke && pos.dir * (fc - stop) <= 0) {
                         pos.broke = true;
                         char t[24]; strcpy(t, "STOP "); money_to(t + 5, ridePnl(stop), false);
-                        add_mark(0, C_BEAR, t, 1.3f)->v = stop;
+                        add_mark(0, C_BEAR, t, 1.3f)->v = stop; SFX(SFX_WRONG, 0);
                     }
                 }
                 if (pnl <= pos.liq) closePos(2);
@@ -1982,7 +1994,7 @@ static bool play(uint8_t sel, float *out_total) {
             if (endAt < 0) {
                 if (roundSecs > 0) {
                     float tl = roundSecs - elapsed;
-                    if (tl <= 5.02f && tl > 0) { int n = ceil_i(tl); if (countN < 0 || n < countN) { countN = n; countT = now_s; } }
+                    if (tl <= 5.02f && tl > 0) { int n = ceil_i(tl); if (countN < 0 || n < countN) { countN = n; countT = now_s; SFX(SFX_COUNT, n); } }
                     if (tl <= 0) endAt = now_s;
                 }
                 if (mode == M_SNIPER && !bullets && !pos.on) endAt = now_s + 0.6f;
@@ -2052,13 +2064,23 @@ static bool results(uint8_t sel, float total, bool record) {
     k = (float)nbars - 0.002f; ox = oy = 0; pb = PB; setp(C_BG, RGB_BG); lockI = -1;
     memset(&pos, 0, sizeof pos);
     frame_prep(); camera(0, true); grid_prep();
+    float rT0 = -1; uint8_t beat = 0;
     for (;;) {
         scan();
         if (quit_now || pressed(6, kb_Clear)) { latch(); return false; }
         bool go = pressed(6, kb_Enter) || pressed(1, kb_2nd);
         latch();
-        if (go) return true;
+        if (go) { SFX(SFX_TAP, 0); return true; }
         now_s = clock_s();
+        { /* the web's Results beats: the result stamps in, then each star, a record, a level up */
+            if (rT0 < 0) rT0 = now_s;
+            float rt = now_s - rT0, net0 = mode == M_BLOWUP ? total - startBank : total;
+            if (beat == 0 && rt >= 0.52f) { beat = 1; SFX(SFX_STAMP, net0 >= -0.5f); }
+            if (beat >= 1 && beat <= 3 && stage >= 0 && beat - 1 < runStars && rt >= 0.87f + 0.14f * (beat - 1)) { SFX(SFX_RIGHT, beat); beat++; }
+            else if (beat >= 1 && beat < 4 && (stage < 0 || beat - 1 >= runStars) && rt >= 0.87f) beat = 4;
+            if (beat == 4 && rt >= 1.17f) { beat = 5; if (record) SFX(SFX_BIG, 1); }
+            if (beat == 5 && rt >= 1.35f) { beat = 6; if (level_of(xp) > lvBefore) SFX(SFX_BIG, 1 + level_of(xp) - lvBefore > 4 ? 4 : 1 + level_of(xp) - lvBefore); }
+        }
         gfx_FillScreen(C_BG);
         draw_grid(); draw_candles(true); draw_axes(false);
         float net = mode == M_BLOWUP ? total - startBank : total;
