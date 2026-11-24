@@ -1,6 +1,9 @@
 # Setup Rush on the T-Deck
 
-The Setup Rush trading game, built into the device firmware. Open it from the orange SETUP RUSH button on Home, or press `$`.
+The Setup Rush trading game on the LilyGo T-Deck Plus. Two builds:
+
+- `env:setup-rush` (what the deck runs): Setup Rush is the whole firmware. It powers on into the intro, then the menu, then rounds. No lilyshark UI, no radio (held in reset), no mesh. Source: `src/srush_app/main.cpp`.
+- `env:t-deck`: the lilyshark firmware with the game inside it, opened from the orange SETUP RUSH button on Home or the `$` key.
 
 ## Controls
 
@@ -32,11 +35,12 @@ Menus: tap what you want, swipe or roll the trackball to move, click or ENTER to
 python3 tools/setup_rush/sync_game.py          # after changing main.c
 cc -O2 -w -Isrc/setup_rush tools/setup_rush/desktop.c src/setup_rush/srush_*.c -o .pio/srush/srush -lm
 .pio/srush/srush OUTDIR SCRIPT                 # scripted input on the desktop, PPM frames + audio.raw
-uvx --from platformio==6.1.19 --with intelhex platformio run -e t-deck
-tools/setup_rush/flash.sh --wait 30            # full 16 MB backup first, then the app slot only; settings kept
+uvx --from platformio==6.1.19 --with intelhex platformio run -e setup-rush
+tools/setup_rush/flash.sh --env setup-rush --wait 30   # full 16 MB backup first, then the app; also erases the second
+                                                       # app slot so no lilyshark copy can boot. NVS (the save) is kept
 python tools/setup_rush/deck.py OUTDIR start key:$'\r' wait:5 shot:round   # drive the real deck over USB
 ```
 
-`src/assets/map_tiles_baked.cpp` is git-ignored. Copy it from the main checkout before a device build, or the firmware ships without offline maps.
+For `env:t-deck` only: `src/assets/map_tiles_baked.cpp` is git-ignored. Copy it from the main checkout before that build, or the firmware ships without offline maps.
 
 Rollback: `esptool write_flash 0x0 <backup>.bin`, using the backup `flash.sh` wrote to `~/lilyshark-backups/`.

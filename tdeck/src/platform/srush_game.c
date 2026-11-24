@@ -1215,7 +1215,10 @@ static void draw_trails(void) {
 }
 
 static int labTop = 999; /* the highest exit label this frame (target, stop, liq): the ticker gives way to one near the top */
-static void exit_label(const char *t, int y, uint8_t col) { text_r(t, PR - 8, y, col, 1); if (y < labTop) labTop = y; }
+static void exit_label(const char *t, int y, uint8_t col) {
+    if (y < 30) y = 30; if (y > 214) y = 214;   /* clear of the clock pill and the time row */
+    text_r(t, PR - 8, y, col, 1); if (y < labTop) labTop = y;
+}
 static void draw_risk(void) {
 #ifdef NO_RISK
     return;
@@ -1366,8 +1369,10 @@ static void draw_time_row(void) {
         else { int hh = (int)(day / 3600); s[0] = '0' + (char)(hh / 10); s[1] = '0' + (char)(hh % 10); s[2] = ':'; s[3] = '0'; s[4] = '0'; s[5] = 0; }
         int w = textw(s, 1);
         if (x - w / 2 < 4 || x + w / 2 > xt - 8) continue;
+        gfx_SetColor(C_BG); gfx_FillRectangle(x - w / 2 - 3, 225, w + 6, 13);   /* lines pass under the labels */
         text(s, x - w / 2, 228, C_MUTED, 1);
     }
+    gfx_SetColor(C_BG); gfx_FillRectangle(xt - 4, 225, wt + 8, 13);
     text(W.sym, xt, 228, C_TEXT, 1); text("5M", xt + wt - textw("5M", 1), 228, C_MUTED, 1);
 }
 
