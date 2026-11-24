@@ -58,10 +58,10 @@ PY
 )
 echo "booting app slot ${slot}"
 
-"${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before no_reset --after no_reset \
+"${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before default_reset --after no_reset \
   write_flash 0x10000 "${image}" | tr '\r' '\n' | grep -vE '^Writing at' | tail -4
 if [[ "${slot}" != 0 ]]; then
-  "${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before no_reset --after no_reset erase_region 0xe000 0x2000 | tail -1
+  "${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before default_reset --after no_reset erase_region 0xe000 0x2000 | tail -1
 fi
-"${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before no_reset --after hard_reset read_mac | tail -1
+"${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before default_reset --after hard_reset read_mac | tail -1
 echo "FLASHED ${image}"
