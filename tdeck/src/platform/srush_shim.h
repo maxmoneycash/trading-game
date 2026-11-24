@@ -41,6 +41,10 @@ void gfx_SwapDraw(void);
 uint8_t gfx_SetColor(uint8_t index);
 void gfx_FillScreen(uint8_t index);
 void gfx_SetPixel(int x, int y);
+/* T-Deck only: one of the app's emoji candle sprites (set 0..5, up or down), its top-left at x, y, blended in */
+void sr_emoji(int set, int up, int x, int y);
+int sr_emoji_sets(void);
+const char *sr_emoji_name(int set);
 void gfx_HorizLine(int x, int y, int length);
 void gfx_HorizLine_NoClip(int x, int y, int length);
 void gfx_VertLine(int x, int y, int length);

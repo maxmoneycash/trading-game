@@ -33,6 +33,25 @@ void gfx_FillScreen(uint8_t index)
     for (int i = 0; i < W * H; i++) p[i] = c;
 }
 void gfx_SetPixel(int x, int y) { if ((unsigned)x < W && (unsigned)y < H) sr.fb[y * W + x] = cur; }
+#include "srush_emoji.h"
+int sr_emoji_sets(void) { return SR_EMOJI_SETS; }
+const char *sr_emoji_name(int set) { return SR_EMOJI_NAME[set % SR_EMOJI_SETS]; }
+void sr_emoji(int set, int up, int x0, int y0)
+{
+    int k = (set % SR_EMOJI_SETS) * 2 + (up ? 0 : 1);
+    const uint16_t *px = SR_EMOJI_PX[k]; const uint8_t *al = SR_EMOJI_A[k];
+    for (int y = 0; y < SR_EMOJI_SIZE; y++) {
+        int sy = y0 + y; if ((unsigned)sy >= H) continue;
+        for (int x = 0; x < SR_EMOJI_SIZE; x++) {
+            int sx = x0 + x, i = y * SR_EMOJI_SIZE + x; if ((unsigned)sx >= W) continue;
+            int a = (al[i >> 1] >> ((i & 1) * 4)) & 15; if (!a) continue;
+            uint16_t c = px[i], *d = sr.fb + sy * W + sx;
+            if (a == 15) { *d = c; continue; }
+            int r = ((*d >> 11) * (15 - a) + (c >> 11) * a) / 15, g = (((*d >> 5) & 63) * (15 - a) + ((c >> 5) & 63) * a) / 15, b = ((*d & 31) * (15 - a) + (c & 31) * a) / 15;
+            *d = (uint16_t)((r << 11) | (g << 5) | b);
+        }
+    }
+}
 
 static void hspan(int x, int y, int len)
 {

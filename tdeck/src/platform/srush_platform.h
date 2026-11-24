@@ -14,6 +14,8 @@ typedef struct SrRaw {
     bool click;                   /* the trackball pressed in */
     uint8_t roll[4];              /* trackball steps since the last read: up, down, left, right */
     char keys[8]; uint8_t nkeys;  /* keyboard characters since the last read */
+    uint8_t held;                 /* keys held right now, when the keyboard can say: bit 0 a long key (W, SPACE),
+                                   * bit 1 a short key (S); bit 7 set means it can (its raw mode answers) */
 } SrRaw;
 void sr_input_scan(uint8_t kb[8]);
 void sr_overlay(void);

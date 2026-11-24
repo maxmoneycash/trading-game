@@ -91,6 +91,21 @@ static const Theme THEMES[NTHEME] = {
 };
 static uint8_t themeI;
 static bool hollowUp;  /* the theme's up body is the floor: drawn as its outline */
+/* how bars are drawn (the app's candle styles): 0 Classic, 1 Line, 2.. Emoji, one of the app's six pairs (T-Deck: the
+ * calculator has no colour glyphs) */
+#ifdef SR_TDECK
+#define NSTYLE 8
+#else
+#define NSTYLE 2
+#endif
+static uint8_t chartStyle;
+static const char *style_name(uint8_t st) { if (st == 0) return "CLASSIC"; if (st == 1) return "LINE";
+#ifdef SR_TDECK
+    return sr_emoji_name(st - 2);
+#else
+    return "CLASSIC";
+#endif
+}
 static uint32_t RGB_BG = 0x0a0a0b, RGB_TEXT = 0xf4f3ef, RGB_MUTED = 0x8a8a8f, RGB_BEAR = 0xff4b3e, RGB_BULL = 0xf4f3ef;
 #define RGB_GAIN 0x42c86cUL
 #define RGB_ORANGE 0xff5a1fUL
@@ -575,7 +590,7 @@ static void grid_prep(void) {
 enum {
     I_BLUE = 70, I_BLUE7, I_BLUE5, I_BLUE35, I_BLUE25, I_BLUEF, I_BLUE8, I_VIO, I_VIO7, I_VIO5, I_VIO35, I_VIO25, I_VIOF,
     I_GOLD, I_GOLD4, I_GOLDF, I_SQZ, I_GRAY6, I_GRAY3, I_GRAYF, I_TEXT45, I_BEAR45, I_TEXT3, I_BEAR3, I_STUP, I_STDN, I_TEXT8,
-    I_VOLU, I_VOLD
+    I_VOLU, I_VOLD, I_LINEF
 };
 static void ind_palette(void) {
     static const uint32_t B = 0x8ab4f8UL, V = 0xb4a2ffUL, G = 0xe9b949UL, GR = 0x8a8a8eUL;
@@ -585,7 +600,8 @@ static void ind_palette(void) {
     setai(I_GRAY6, GR, 154); setai(I_GRAY3, GR, 77); setai(I_GRAYF, GR, 15);
     setai(I_TEXT45, RGB_TEXT, 115); setai(I_BEAR45, RGB_BEAR, 115); setai(I_TEXT3, RGB_TEXT, 77); setai(I_BEAR3, RGB_BEAR, 77);
     setai(I_STUP, B, 15); setai(I_STDN, V, 18); setai(I_TEXT8, RGB_TEXT, 205);
-    setai(I_VOLU, RGB_TEXT, 36); setai(I_VOLD, RGB_BEAR, 46);   /* volume, as the app's floor bars */
+    setai(I_VOLU, RGB_TEXT, 36); setai(I_VOLD, RGB_BEAR, 46);
+    setai(I_LINEF, RGB_TEXT, 16);   /* the Line style's fill under the line */   /* volume, as the app's floor bars */
 }
 
 static uint8_t preset;
@@ -1059,6 +1075,10 @@ static void openPos(int8_t dir) {
     shake = shake > 1.5f ? shake : 1.5f;
 }
 
+/* every ride of the round, for the recap (the app's S.log) */
+typedef struct { long q0, q1; int v0, v1; int8_t dir; float pnl; } RideLog;
+#define MAXLOG 40
+static RideLog rlog[MAXLOG]; static uint8_t nlog;
 static void closePos(uint8_t reason) { /* 0 release, 1 flip, 2 liq, 3 end */
     if (!pos.on) return;
     int price = fc;
@@ -1076,6 +1096,7 @@ static void closePos(uint8_t reason) { /* 0 release, 1 flip, 2 liq, 3 end */
     Exit *e = &exits[nex++];
     e->dir = pos.dir; e->good = good; e->q0 = pos.entryQ; e->v0 = pos.entry; e->q1 = kq; e->v1 = price; e->t0 = now_s;
     money_to(e->money, pnl, false);
+    if (nlog < MAXLOG) { RideLog *L = &rlog[nlog++]; L->q0 = pos.entryQ; L->v0 = pos.entry; L->q1 = kq; L->v1 = price; L->dir = pos.dir; L->pnl = pnl; }
     /* the ride's path glows, then dissolves */
     Trail *t = !trails[0].on ? &trails[0] : !trails[1].on ? &trails[1] : trails[0].age > trails[1].age ? &trails[0] : &trails[1];
     t->on = true; t->good = good; t->age = 0; t->n = 0;
@@ -1176,6 +1197,18 @@ static void candle_px(int x, int o, int h, int l, int c, bool dim) {
     int yh = Y(h), yl = Y(l), yo = Y(o), yc = Y(c);
     int t = isup ? yc : yo, b = isup ? yo : yc;
     bool in = x >= BODY && x < PR - BODY && yh >= 0 && yl < 240; /* wholly on screen: skip graphx's clipping */
+#ifdef SR_TDECK
+    if (chartStyle >= 2 && !dim && !fog()) { /* Emoji (the app's emoji-candles.js): a tinted body, the wick, and whole emoji
+                                             * stacked from the open toward the close, at least one */
+        gfx_SetColor(isup ? C_DUPB : C_DDNB);
+        gfx_VertLine(x, yh, yl - yh + 1);
+        gfx_FillRectangle(x - BODY / 2, t, BODY, b - t + 1);
+        int h = b - t, sz = 10, pitch = 7;
+        if (h < sz) sr_emoji(chartStyle - 2, isup, x - sz / 2, t + h / 2 - sz / 2);
+        else for (int n = (h - sz) / pitch + 1, i = 0; i < n; i++) sr_emoji(chartStyle - 2, isup, x - sz / 2, isup ? yo - sz - i * pitch : yo + i * pitch);
+        return;
+    }
+#endif
     gfx_SetColor(dim ? (isup ? C_DUPB : C_DDNB) : (isup ? C_UPW : C_DNW));
     if (in) gfx_VertLine_NoClip(x, yh, yl - yh + 1); else gfx_VertLine(x, yh, yl - yh + 1);
     if (isup && hollowUp) {
@@ -1187,9 +1220,21 @@ static void candle_px(int x, int o, int h, int l, int c, bool dim) {
     if (in) gfx_FillRectangle_NoClip(x - BODY / 2, t, BODY, b - t + 1); else gfx_FillRectangle(x - BODY / 2, t, BODY, b - t + 1);
 }
 
+static void draw_line_style(int first, bool dim) {
+    /* Line (the app's drawLine): through the closes, a faint fill to the floor, the newest step in the live colour */
+    int px = XI(first), py = Y(BC(first));
+    for (int i = first + 1; i <= kf; i++) {
+        int x = XI(i), y = Y(i == kf ? fc : BC(i));
+        if (!dim) { gfx_SetColor(I_LINEF); for (int c = px; c < x; c++) { int yy = py + (y - py) * (c - px) / (x - px); if (c >= 0 && c < PR && yy < pb) gfx_VertLine(c, yy, pb - yy); } }
+        uint8_t col = dim ? C_DUPB : i == kf ? (fc >= fo ? C_BULL : C_BEAR) : C_TEXT;
+        gfx_SetColor(col); gfx_Line(px, py, x, y); gfx_Line(px, py + 1, x, y + 1);
+        px = x; py = y;
+    }
+}
 static void draw_candles(bool dim) {
     int first = kf - VIS; if (first < 0) first = 0;
     int fogK = fog() && scene == 1 ? kf - 12 : -99;
+    if (chartStyle == 1 && !fog()) { draw_line_style(first, dim); return; }
     for (int i = first; i < kf; i++) {
         if (i < fogK - 4) continue;                      /* Fog of War: the last 12 candles, the tail fading out */
         candle_px(XI(i), BO(i), BH(i), BL(i), BC(i), dim || i < fogK);
@@ -1822,22 +1867,23 @@ static void load_save(void) {
     ti_var_t v = ti_Open("SRSAVE", "r");
     if (!v) return;
     char tag[2] = { 0, 0 };
-    if (ti_GetSize(v) >= 2 + 1 + 4 * NMODES + 1 + 3 && ti_Read(tag, 1, 2, v) == 2 && tag[0] == 'S' && tag[1] >= '2' && tag[1] <= '6') {
+    if (ti_GetSize(v) >= 2 + 1 + 4 * NMODES + 1 + 3 && ti_Read(tag, 1, 2, v) == 2 && tag[0] == 'S' && tag[1] >= '2' && tag[1] <= '7') {
         ti_Read(&plays, 1, 1, v); ti_Read(bestM, sizeof bestM, 1, v); ti_Read(&hasM, 1, 1, v); ti_Read(&dailyDay, 3, 1, v);
         if (tag[1] >= '3') ti_Read(starsOf, 1, NSTAGE, v);
         if (tag[1] >= '5') { ti_Read(&msDay, 3, 1, v); ti_Read(msIds, 1, 3, v); ti_Read(&msDone, 1, 1, v); ti_Read(&msBonus, 1, 1, v); ti_Read(msProg, 4, 3, v); }
         if (tag[1] >= '4') { ti_Read(&xp, 4, 1, v); ti_Read(&cash, 4, 1, v); ti_Read(&owned, 2, 1, v); ti_Read(&themeI, 1, 1, v); if (themeI >= NTHEME) themeI = 0; owned |= 3; }
         if (tag[1] >= '6') ti_Read(&botBeat, 1, 1, v);
+        if (tag[1] >= '7') { ti_Read(&chartStyle, 1, 1, v); if (chartStyle >= NSTYLE) chartStyle = 0; }
     } else { ti_Rewind(v); if (ti_GetSize(v) >= 4) { ti_Read(&bestM[M_PRO], 4, 1, v); hasM = 1 << M_PRO; } if (ti_GetSize(v) >= 5) ti_Read(&plays, 1, 1, v); }
     ti_Close(v);
 }
 static void save_save(void) {
     ti_var_t v = ti_Open("SRSAVE", "w");
     if (!v) return;
-    ti_Write("S6", 1, 2, v); ti_Write(&plays, 1, 1, v); ti_Write(bestM, sizeof bestM, 1, v); ti_Write(&hasM, 1, 1, v); ti_Write(&dailyDay, 3, 1, v);
+    ti_Write("S7", 1, 2, v); ti_Write(&plays, 1, 1, v); ti_Write(bestM, sizeof bestM, 1, v); ti_Write(&hasM, 1, 1, v); ti_Write(&dailyDay, 3, 1, v);
     ti_Write(starsOf, 1, NSTAGE, v);
     ti_Write(&msDay, 3, 1, v); ti_Write(msIds, 1, 3, v); ti_Write(&msDone, 1, 1, v); ti_Write(&msBonus, 1, 1, v); ti_Write(msProg, 4, 3, v);
-    ti_Write(&xp, 4, 1, v); ti_Write(&cash, 4, 1, v); ti_Write(&owned, 2, 1, v); ti_Write(&themeI, 1, 1, v); ti_Write(&botBeat, 1, 1, v);
+    ti_Write(&xp, 4, 1, v); ti_Write(&cash, 4, 1, v); ti_Write(&owned, 2, 1, v); ti_Write(&themeI, 1, 1, v); ti_Write(&botBeat, 1, 1, v); ti_Write(&chartStyle, 1, 1, v);
     ti_Close(v);
 }
 
@@ -2028,12 +2074,24 @@ static void mark_mini(int x0, int y0) {
 }
 /* the market's bars before the round, small: what you are about to play */
 static void mini_chart(int x0, int y0, int w, int h) {
-    int nb = w / 5, a = lead - nb; if (a < 0) a = 0;
+    int pitch = chartStyle >= 2 ? 11 : 5;   /* emoji need room */
+    int nb = w / pitch, a = lead - nb; if (a < 0) a = 0;
     int hi = BC(a), lo = BC(a);   /* scaled to the bodies, so one wild wick cannot flatten the rest */
     for (int i = a; i < lead; i++) { int o = BO(i), c = BC(i); if (o > hi) hi = o; if (c > hi) hi = c; if (o < lo) lo = o; if (c < lo) lo = c; }
     if (hi <= lo) hi = lo + 1;
 #define MYR(v) (y0 + h - 1 - (int)((long)((v) - lo) * (h - 1) / (hi - lo)))
 #define MY(v) (MYR(v) < y0 ? y0 : MYR(v) > y0 + h - 1 ? y0 + h - 1 : MYR(v))
+    if (chartStyle == 1) { /* Line */
+        for (int i = a + 1; i < lead; i++) { int xa = x0 + (i - 1 - a) * 5 + 2, xb = xa + 5; gfx_SetColor(C_TEXT); gfx_Line(xa, MY(BC(i - 1)), xb, MY(BC(i))); gfx_Line(xa, MY(BC(i - 1)) + 1, xb, MY(BC(i)) + 1); }
+        return;
+    }
+#ifdef SR_TDECK
+    if (chartStyle >= 2) { /* Emoji: one per bar, at the body */
+        for (int i = a; i < lead; i++) { bool up = BC(i) >= BO(i); int x = x0 + (i - a) * 11, t = MY(up ? BC(i) : BO(i)), b = MY(up ? BO(i) : BC(i));
+            gfx_SetColor(up ? C_DUPB : C_DDNB); gfx_FillRectangle(x + 2, t, 7, b - t + 1); sr_emoji(chartStyle - 2, up, x, (t + b) / 2 - 5); }
+        return;
+    }
+#endif
     for (int i = a; i < lead; i++) {
         int x = x0 + (i - a) * 5 + 1; bool up = BC(i) >= BO(i);
         gfx_SetColor(up ? C_UPW : C_DNW); gfx_VertLine(x + 1, MY(BH(i)), MY(BL(i)) - MY(BH(i)) + 1);
@@ -2055,7 +2113,7 @@ static int text_wrap(const char *s, int x, int y, int maxw, uint8_t col) {
     }
     return y;
 }
-static uint8_t tab_rows(void) { return tab == 0 ? NMODES : tab == 1 ? NBOT : tab == 2 ? NSTAGE : tab == 3 ? 3 : NTHEME; }
+static uint8_t tab_rows(void) { return tab == 0 ? NMODES : tab == 1 ? NBOT : tab == 2 ? NSTAGE : tab == 3 ? 3 : NTHEME + NSTYLE; }
 static uint8_t *tab_row(void) { return tab == 0 ? &menuI : tab == 1 ? &botSel : tab == 2 ? &stSel : tab == 3 ? &msRow : &shopSel; }
 static void best_text(char *d, uint8_t m) { if (m == M_CALLIT) { char *o = digits(d, (long)bestM[m], 0, 0); strcpy(o, " PTS"); } else money_to(d, bestM[m], false); }
 
@@ -2118,10 +2176,11 @@ static bool menu(uint8_t *sel) {
         if (tab == 2 && !hasCareer) w = *sel;
         load_win(w);
         /* the Shop dresses the whole screen in the theme under the cursor */
-        uint8_t wantTheme = tab == 4 ? shopSel : themeI;
+        uint8_t wantTheme = tab == 4 && shopSel < NTHEME ? shopSel : themeI;
         if (wantTheme != shownTheme) { uint8_t keep = themeI; themeI = wantTheme; palette(); ind_palette(); vision_palette(); themeI = keep; shownTheme = wantTheme; }
         if (go) {
-            if (tab == 4) { /* equip what you own, buy what you can afford */
+            if (tab == 4 && shopSel >= NTHEME) { chartStyle = (uint8_t)(shopSel - NTHEME); SFX(SFX_WIN, 1); save_save(); }   /* chart styles are free */
+            else if (tab == 4) { /* equip what you own, buy what you can afford */
                 if (owned & (1 << shopSel)) themeI = shopSel;
                 else if (cash >= THEMES[shopSel].price) { cash -= THEMES[shopSel].price; owned |= (uint16_t)(1 << shopSel); themeI = shopSel; SFX(SFX_WIN, 1); }
                 else SFX(SFX_WRONG, 0);
@@ -2176,6 +2235,11 @@ static bool menu(uint8_t *sel) {
                 while (textw(d, 1) > LIST_W - 60 && strlen(d) > 4) d[strlen(d) - 1] = 0;   /* room for the stars */
                 text(d, LIST_X + 13, ty, open ? col : C_BORDER, 1);
                 for (int q = 0; q < 3; q++) star(LIST_X + LIST_W - 40 + q * 12, ty - 1, open && q < starsOf[i] ? C_ORANGE : C_BORDER);
+            } else if (i >= NTHEME) { /* a chart style */
+                uint8_t st = (uint8_t)(i - NTHEME);
+                strcpy(d, st >= 2 ? "EMOJI " : "CANDLES "); if (st < 2) strcpy(d, st ? "LINE" : "CANDLES"); else strcat(d, style_name(st));
+                text(d, LIST_X + 13, ty, col, 1);
+                text_r(chartStyle == st ? "ON" : "FREE", LIST_X + LIST_W - 6, ty, chartStyle == st ? C_ORANGE : C_MUTED, 1);
             } else {
                 const Theme *th = &THEMES[i];
                 text(th->name, LIST_X + 13, ty, col, 1);
@@ -2223,6 +2287,12 @@ static bool menu(uint8_t *sel) {
                     star(px + 4, sy, q < starsOf[stSel] ? C_ORANGE : C_BORDER);
                     goal_text(d, st->stars[q]); text(d, px + 14, sy + 1, q < starsOf[stSel] ? C_TEXT : C_MUTED, 1);
                 }
+            } else if (shopSel >= NTHEME) { /* a chart style, shown on the market */
+                uint8_t st = (uint8_t)(shopSel - NTHEME), keep = chartStyle;
+                text("CHART", px, y, C_ORANGE, 1); y += 12;
+                text(st >= 2 ? style_name(st) : st ? "LINE" : "CANDLES", px, y, C_TEXT, 2);
+                chartStyle = st; mini_chart(px, 112, pw, 46); chartStyle = keep;
+                text(chartStyle == st ? "USING" : "FREE", px, 172, chartStyle == st ? C_ORANGE : C_MUTED, 1);
             } else {
                 const Theme *th = &THEMES[shopSel];
                 text("THEME", px, y, C_ORANGE, 1); y += 12;
@@ -2246,8 +2316,10 @@ static bool menu(uint8_t *sel) {
             if (arrows) { gfx_SetColor(focus == 2 ? C_TEXT : C_MUTED); gfx_FillTriangle(mw - 6, 210, mw - 6, 222, mw, 216); }
         }
         {
-            const char *act = tab == 1 ? "RACE" : tab == 4 ? (themeI == shopSel ? "WEARING" : (owned & (1 << shopSel)) ? "WEAR" : "BUY") : "PLAY";
-            bool dead = (tab == 2 && !stage_open(stSel)) || (tab == 4 && themeI == shopSel) || (tab == 4 && !(owned & (1 << shopSel)) && cash < THEMES[shopSel].price);
+            bool style = tab == 4 && shopSel >= NTHEME;
+            const char *act = tab == 1 ? "RACE" : style ? (chartStyle == shopSel - NTHEME ? "USING" : "USE") : tab == 4 ? (themeI == shopSel ? "WEARING" : (owned & (1 << shopSel)) ? "WEAR" : "BUY") : "PLAY";
+            bool dead = (tab == 2 && !stage_open(stSel)) || (style && chartStyle == shopSel - NTHEME) ||
+                        (tab == 4 && !style && themeI == shopSel) || (tab == 4 && !style && !(owned & (1 << shopSel)) && cash < THEMES[shopSel].price);
             if (tab == 1) { /* watch it alone, or race it */
                 frame(150, 202, 58, 26, 6, focus == 2 ? C_MUTED : C_BORDER, C_CARD); text_c("WATCH", 179, 211, focus == 2 ? C_TEXT : C_MUTED, 1);
                 keycap(214, 202, 100, act);
@@ -2281,6 +2353,76 @@ static void answer(int8_t dir) {
     callCheck.on = true; callCheck.at = st.at + 12; callCheck.i = callI; callCheck.right = right;
 }
 
+/* ---- the recap (the app's startRecap / drawRecap): when the round ends the camera eases out to the whole round, from
+ * a little before its first bar to the last, and every ride is drawn on it in order: the entry, the box growing to the
+ * exit, its money. ------------------------------------------------------------------------------------------------ */
+static float ease_io(float p) { if (p <= 0) return 0; if (p >= 1) return 1; if (p < 0.5f) return 4 * p * p * p; float q = -2 * p + 2; return 1 - q * q * q / 2; }
+static void draw_recap(float t) {
+    const int top = 68, bot = 210, pw = PR;
+    float e = ease_io(t / 1.1f);
+    int k0 = lead, k1 = kf;
+    float span = (float)(k1 - k0); if (span < 8) span = 8;
+    float m0 = span * 0.12f, m1 = span * 0.05f; if (m0 < 6) m0 = 6; if (m1 < 3) m1 = 3;
+    float tl = (float)k0 - m0, tr = (float)k1 + 1 + m1; if (tl < 0) tl = 0;
+    int lo = fl, hi = fh;
+    for (int i = (int)tl; i < k1 && i < nbars; i++) { if (BL(i) < lo) lo = BL(i); if (BH(i) > hi) hi = BH(i); }
+    for (uint8_t j = 0; j < nlog; j++) { int a = rlog[j].v0, b = rlog[j].v1; if (a < lo) lo = a; if (b < lo) lo = b; if (a > hi) hi = a; if (b > hi) hi = b; }
+    float pad = (float)(hi - lo) * 0.1f + 1, tlo = (float)lo - pad, thi = (float)hi + pad;
+    /* from the live view: the forming bar at the tape's head, the camera's price range */
+    float sl = (float)kf - (float)TIPX / SLOT, sr2 = sl + (float)PR / SLOT;
+    float L = sl + (tl - sl) * e, R = sr2 + (tr - sr2) * e, LO = camLoF + (tlo - camLoF) * e, HI = camHiF + (thi - camHiF) * e;
+    if (R - L < 1) R = L + 1; if (HI - LO < 1) HI = LO + 1;
+#define RCX(k) ((int)(((float)(k) - L) * (float)pw / (R - L)))
+#define RCY(v) (top + (int)((HI - (float)(v)) * (float)(bot - top) / (HI - LO)))
+    float slot = (float)pw / (R - L); int bw = (int)(slot * 0.74f); if (bw < 1) bw = 1; if (bw > BODY) bw = BODY;
+    /* the grid's price lines, kept */
+    gfx_SetColor(C_GRID);
+    { long st = nice_step((long)((HI - LO) / 6), &gridShow); if (st < 1) st = 1; for (long g = ((long)LO / st + 1) * st; g < (long)HI; g += st) { int y = RCY(g); if (y > top - 20 && y < bot) { gfx_SetColor(C_GRID); gfx_HorizLine(0, y, pw); if (y > top - 6) text(price_raw(raw_of((int)g), gridShow), PR + 6, y - 3, C_MUTED, 1); } } }   /* the price scale stays */
+    /* the bars: the round full strength, what came before it quieter */
+    for (int i = (int)L < 0 ? 0 : (int)L; i <= kf && i < nbars; i++) {
+        int x = RCX(i + 0.5f); if (x < -bw || x > pw + bw) continue;
+        int o = i == kf ? fo : BO(i), h = i == kf ? fh : BH(i), l = i == kf ? fl : BL(i), c = i == kf ? fc : BC(i);
+        bool up = c >= o, before = i < k0;
+        int yo = RCY(o), yc = RCY(c), yh = RCY(h), yl = RCY(l), tt = up ? yc : yo, bb = up ? yo : yc;
+        gfx_SetColor(before ? (up ? C_DUPB : C_DDNB) : (up ? C_UPW : C_DNW)); gfx_VertLine(x, yh, yl - yh + 1);
+        gfx_SetColor(before ? (up ? C_DUPB : C_DDNB) : (up ? C_UPB : C_DNB)); gfx_FillRectangle(x - bw / 2, tt, bw, bb - tt + 1);
+    }
+    /* where the round began */
+    if (t > 0.3f) {
+        int xs = RCX(k0);
+        gfx_SetColor(C_MUTED); for (int y = top - 18; y < bot; y += 7) gfx_VertLine(xs, y, 3);
+        text("START", xs + 5, top - 13, C_MUTED, 1);
+    }
+    /* every ride, in the order made: the box grows from the entry to the exit, then its money settles */
+    float gap = nlog ? 1.2f / nlog : 0; if (gap > 0.16f) gap = 0.16f;
+    for (uint8_t j = 0; j < nlog; j++) {
+        float age = t - (0.45f + j * gap); if (age < 0) break;
+        const RideLog *r = &rlog[j];
+        float g = age / 0.3f; if (g > 1) g = 1; g = 1 - (1 - g) * (1 - g) * (1 - g);
+        int x0 = RCX(r->q0 / 1024.0f), x1 = RCX(r->q1 / 1024.0f), y0 = RCY(r->v0), y1 = RCY(r->v1);
+        bool good = r->pnl >= 0; uint8_t col = good ? C_BULL : C_BEAR;
+        int xg = x0 + (int)((float)(x1 - x0 > 1 ? x1 - x0 : 1) * g), yt = y0 < y1 ? y0 : y1, hb = y0 < y1 ? y1 - y0 : y0 - y1; if (hb < 1) hb = 1;
+        gfx_SetColor(good ? I_LINEF : I_VOLD); gfx_FillRectangle(x0, yt, xg - x0, hb);
+        gfx_SetColor(good ? C_EDGEUP : C_EDGEDN); gfx_Rectangle(x0, yt, xg - x0 > 1 ? xg - x0 : 1, hb + 1);
+        if (r->dir > 0) tri(x0, y0 + 3, 4, 7, true, C_TEXT); else tri(x0, y0 - 9, 4, 7, false, C_TEXT);
+        if (age < 0.3f) continue;
+        gfx_SetColor(col); gfx_FillRectangle(x1 - 1, y1 - 6, 3, 13);
+        char m[20]; money_to(m, r->pnl, false);
+        int w = textw(m, 1) + 8, cx = x1 + 5, cy = r->dir > 0 ? yt - 15 : yt + hb + 4;
+        if (cx + w > pw) cx = x1 - 5 - w; if (cy < top - 6) cy = yt + hb + 4; if (cy > bot - 4) cy = yt - 15;
+        rr(cx, cy, w, 12, 3, col); text_on(m, cx + 4, cy + 3, C_INK, 1, col);
+    }
+#undef RCX
+#undef RCY
+    /* the plate at the foot: the rides and the wins */
+    {
+        char d[40], *o = digits(d, nlog, 0, 0); strcpy(o, nlog == 1 ? " RIDE   " : " RIDES   "); o += strlen(o);
+        o = digits(o, wins, 0, 0); strcpy(o, " WON");
+        int w = textw(d, 1) + 24;
+        frame(PR / 2 - w / 2, 216, w, 18, 5, C_BORDER, C_CARD);
+        text_c(d, PR / 2, 221, C_MUTED, 1);
+    }
+}
 static bool play(uint8_t sel, float *out_total) {
     load_win(sel);
     memset(&press, 0, sizeof press); memset(&pos, 0, sizeof pos); memset(exits, 0, sizeof exits); nex = 0;
@@ -2288,7 +2430,7 @@ static bool play(uint8_t sel, float *out_total) {
     memset(locked, 0, sizeof locked); memset(resShown, 0, sizeof resShown);
     k = (float)lead; elapsed = 0; tempo = 0; slowmo = 0; hit = 0; shake = 0; danger = 0; closeT = -9; closeI = -1;
     countN = -1; countT = -9; introT = INTRO_S; kickT = -9; lastAct = 0; openPnl = 0;
-    realized = 0; rollShown = 0; rides = wins = liqs = 0; lockout = false; rode = false;
+    realized = 0; rollShown = 0; rides = wins = liqs = 0; lockout = false; rode = false; nlog = 0;
     tagOff = -999; flashA = 0; combo = bestCombo = reads = 0; lockI = -1; lockT = -9;
     bullets = 3; lives = 3; points = 0; callStreak = bestCall = callsRight = callsN = 0; callOn = false; callTag = NULL; callFastUntil = -1; callI = -1; callCheck.on = false;
     bank = startBank = peakBank = 10000; lev = 2;
@@ -2333,7 +2475,8 @@ static bool play(uint8_t sel, float *out_total) {
 
         if (introT > 0) introT -= dt;
         else if (ended) {
-            if (now_s - endT > 1.6f) {
+            bool skip = now_s - endT > 2.0f && ((L && !prevL) || (D && !prevD) || pressed(6, kb_Enter));
+            if (now_s - endT > (mode == M_CALLIT ? 1.6f : 6.0f) || skip) {
                 *out_total = mode == M_CALLIT ? points : mode == M_BLOWUP ? bank : realized;
                 latch(); return true;
             }
@@ -2475,6 +2618,15 @@ static bool play(uint8_t sel, float *out_total) {
 #else
 #define T_(i)
 #endif
+        if (ended && mode != M_CALLIT && now_s - endT > 0.5f) { /* the recap: the whole round and every ride */
+            float tot = mode == M_BLOWUP ? bank : realized;
+            gfx_FillScreen(C_BG);
+            draw_recap(now_s - endT - 0.5f);
+            draw_hud(tot, 0); draw_floaters();
+            prevL = L; prevD = D;
+            present();
+            continue;
+        }
         gfx_FillScreen(C_BG); T_(1)
         draw_grid(); draw_volume(); T_(2)
         { int f0 = kf - VIS; if (f0 < 1) f0 = 1; ind_back(f0, kf - 1); }

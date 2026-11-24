@@ -174,6 +174,65 @@ void present(const uint16_t *frame)
     delay(0);  // let the idle task and the USB stack breathe between frames
 }
 
+// ---- the keyboard. LilyGo's keyboard firmware (since June 2025) has a raw mode (command 0x03) whose reads are the
+// whole matrix, 5 column bytes with a bit per held row key; older firmware ignores the command and keeps sending one
+// character per press. Raw mode is trusted only after one held key reads the same in three reads in a row, which a
+// character stream never does; a byte with its top bit set (no matrix has an 8th row) rules it out for good.
+enum class RawState : uint8_t { Unknown, Yes, No };
+RawState raw_state = RawState::Unknown;
+uint8_t raw_last[5] = {0}, raw_same = 0, raw_held = 0;
+// matrix position (column, row) of each key the game reads, from the keyboard firmware's keymap
+struct RawKey { uint8_t col, row; char c; };
+constexpr RawKey kRawKeys[] = {{0, 0, 'q'}, {0, 1, 'w'}, {0, 3, 'a'}, {0, 5, ' '}, {1, 1, 's'}, {1, 2, 'd'},
+                               {3, 1, 'h'}, {3, 6, 'j'}, {4, 6, 'k'}, {4, 1, 'l'}, {3, 3, '\r'}, {4, 3, 8}};
+
+void read_keyboard(SrRaw *r)
+{
+    if(raw_state == RawState::No) {
+        if(Wire.requestFrom(tdeck::keyboard_address, static_cast<uint8_t>(1)) == 1 && Wire.available()) {
+            const uint8_t key = Wire.read();
+            if(key != 0 && r->nkeys < sizeof(r->keys)) r->keys[r->nkeys++] = static_cast<char>(key);
+        }
+        return;
+    }
+    uint8_t b[5] = {0};
+    const uint8_t n = Wire.requestFrom(tdeck::keyboard_address, static_cast<uint8_t>(5));
+    for(uint8_t i = 0; i < n && i < 5 && Wire.available(); ++i) b[i] = Wire.read();
+    while(Wire.available()) (void)Wire.read();
+    if(raw_state == RawState::Unknown) {
+        bool top = false;
+        for(uint8_t i = 1; i < 5; ++i) top |= (b[i] & 0x80U) != 0;
+        if(n != 5 || top) {  // a one-character reply padded out: the old firmware
+            raw_state = RawState::No;
+            if(b[0] != 0 && (b[0] & 0x80U) == 0 && r->nkeys < sizeof(r->keys)) r->keys[r->nkeys++] = static_cast<char>(b[0]);
+            return;
+        }
+        bool any = false;
+        for(uint8_t i = 0; i < 5; ++i) any |= b[i] != 0;
+        if(any && std::memcmp(b, raw_last, 5) == 0) { if(++raw_same >= 2) raw_state = RawState::Yes; }
+        else raw_same = 0;
+        // until it is known, a lone first byte may still be a character
+        const bool lone = !b[1] && !b[2] && !b[3] && !b[4];
+        const bool echoed = b[1] == b[0] && b[2] == b[0] && b[3] == b[0] && b[4] == b[0];  // padded by repeating it
+        const bool chr = (b[0] >= 0x20 && b[0] < 0x7f) || b[0] == '\r' || b[0] == 8;
+        if(raw_state == RawState::Unknown && b[0] && chr && (lone || echoed) && std::memcmp(b, raw_last, 5) != 0 &&
+           r->nkeys < sizeof(r->keys)) r->keys[r->nkeys++] = static_cast<char>(b[0]);
+        std::memcpy(raw_last, b, 5);
+        if(raw_state != RawState::Yes) return;
+    }
+    // raw: a key going down is a press (menus step on it); W, SPACE and S are also held
+    static uint8_t prev[5] = {0};
+    uint8_t held = 0;
+    for(const RawKey &k : kRawKeys) {
+        const bool down = (b[k.col] >> k.row) & 1U, was = (prev[k.col] >> k.row) & 1U;
+        if(down && !was && r->nkeys < sizeof(r->keys)) r->keys[r->nkeys++] = k.c;
+        if(down && (k.c == 'w' || k.c == ' ')) held |= 1U;
+        if(down && k.c == 's') held |= 2U;
+    }
+    std::memcpy(prev, b, 5);
+    raw_held = held;
+}
+
 // ---- input, once per frame
 void raw(SrRaw *r)
 {
@@ -204,11 +263,9 @@ void raw(SrRaw *r)
     const uint32_t now = millis();
     if(keyboard_ready && static_cast<int32_t>(now - next_key_ms) >= 0) {
         next_key_ms = now + 15U;
-        if(Wire.requestFrom(tdeck::keyboard_address, static_cast<uint8_t>(1)) == 1 && Wire.available()) {
-            const uint8_t key = Wire.read();
-            if(key != 0 && r->nkeys < sizeof(r->keys)) r->keys[r->nkeys++] = static_cast<char>(key);
-        }
+        read_keyboard(r);
     }
+    if(raw_state == RawState::Yes) r->held = static_cast<uint8_t>(0x80U | raw_held);
 
     // the GPS sets the clock (the daily chart's day); bounded work per call
     static uint32_t next_gps_ms = 0;
@@ -273,9 +330,15 @@ void setup()
     delay(200);
     Wire.begin(tdeck::i2c_sda_pin, tdeck::i2c_scl_pin, tdeck::i2c_frequency_hz);
     Wire.beginTransmission(tdeck::keyboard_address);
-    Wire.write(0x01);  // keyboard backlight level
+    Wire.write(0x01);  // keyboard backlight level (the firmware's 0x01 falls through and reads a second byte)
+    Wire.write(127);
     Wire.write(127);
     keyboard_ready = Wire.endTransmission() == 0U;
+    if(keyboard_ready) {  // ask for the raw matrix, so keys can be held (older keyboard firmware ignores this)
+        Wire.beginTransmission(tdeck::keyboard_address);
+        Wire.write(0x03);
+        (void)Wire.endTransmission();
+    }
     (void)touch.begin(Wire);
 
     for(uint8_t pin : {tdeck::trackball_up_pin, tdeck::trackball_down_pin, tdeck::trackball_left_pin,

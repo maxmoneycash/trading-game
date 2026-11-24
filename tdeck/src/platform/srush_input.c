@@ -1,7 +1,9 @@
 /* The T-Deck's inputs as the game's keypad, and the thumb ring drawn under a finger that is riding.
  *   In a round:  hold the screen = ride long, slide down = flip short (slide back up = long again); the thumb ring
- *                sits where the finger landed. Holding the trackball click also rides long. Keyboard: W or SPACE
- *                rides long until pressed again, S rides short, ENTER lets go, DEL or Q ends the round.
+ *                sits where the finger landed. Holding the trackball click also rides long. Keyboard: on a keyboard
+ *                that reports holds, hold W or SPACE to ride long and S to ride short (S while W is down flips short,
+ *                letting go of S flips back), and letting go cashes out; otherwise W or SPACE rides long until pressed
+ *                again, S rides short, ENTER lets go. DEL or Q ends the round.
  *   Elsewhere:   tap what you want (the game hit-tests the tap against its own screen), swipe or roll the
  *                trackball = move, trackball click or ENTER = select,
  *                W A S D move, DEL or Q = back (out of the game from the menu).
@@ -39,7 +41,8 @@ void sr_input_scan(uint8_t kb[8])
         char c = r.keys[i];
         if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
         bool back = c == 8 || c == 0x7f || c == 27 || c == 'q';
-        if (play) {
+        if (play && (r.held & 0x80)) { if (back) push(T_CLEAR); }   /* holds known: W and S are read as held, below */
+        else if (play) {
             if (back) push(T_CLEAR);
             /* W: ride long (again: let go). S: ride short, or flip a long short the way a slide does (again: let
              * go). W on a short flips it back long. The long latch stays down under a short: that is the slide. */
@@ -71,6 +74,11 @@ void sr_input_scan(uint8_t kb[8])
 
     /* touch */
     bool L = latchLong || clickHold, D = latchShort;
+    if (play && (r.held & 0x80)) { /* a keyboard that reports holds: W or SPACE held rides long, S held rides short
+                                    * (with W down too it is the slide: short, and back to long when S lets go) */
+        if (r.held & 1) L = true;
+        if (r.held & 2) D = true;
+    }
     if (!r.touch) { touchArmed = true; touchRide = false; }
     if (play) {
         if (r.touch && touchArmed) {
