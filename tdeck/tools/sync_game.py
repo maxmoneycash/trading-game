@@ -3,6 +3,8 @@ The calculator file is the source of truth: setup-rush-ti84/game/src/main.c. Thi
 srush_shim.h and its main() for srush_main(), and turns on the T-Deck's touch build (SR_TOUCH)."""
 import re, sys, pathlib
 src = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else '/Users/maxmohammadi/setup-rush-ti84/game/src/main.c').read_text()
+# headers next to main.c (the intro's R mark) are inlined, so the T-Deck tree keeps one generated file
+src = re.sub(r'#include "(\w+\.h)"\n', lambda m: (pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else '/Users/maxmohammadi/setup-rush-ti84/game/src/main.c').parent / m.group(1)).read_text(), src)
 out = re.sub(r'#include <(graphx|keypadc|fileioc|sys/rtc|debug|intce)\.h>\n', '', src)
 out = out.replace('#include <time.h>\n', '#include <time.h>\n#include "srush_shim.h"\n', 1)
 out = re.sub(r'\bint main\(void\) \{', 'int srush_main(void) {', out)

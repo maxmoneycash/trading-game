@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Put the Setup Rush build on a plugged-in T-Deck, keeping its settings.
-#   tools/setup_rush/flash.sh [--wait MINUTES] [--backup FILE]
+#   tools/setup_rush/flash.sh [--env setup-rush|t-deck] [--wait MINUTES] [--backup FILE]
+# --env setup-rush (the Setup Rush-only firmware) also erases the second app slot and the OTA choice, so no copy of
+# lilyshark is left to boot; NVS stays (the game's save lives there; the backup holds everything else).
 # 1. waits for the deck's serial port (one /dev/cu.usbmodem*),
 # 2. reads the whole 16 MB flash to ~/lilyshark-backups/ (the rollback: write it back at 0x0),
 # 3. writes .pio/build/t-deck/firmware.bin to the first app slot at 0x10000; if the deck was booting the second
@@ -8,7 +10,7 @@
 # Rollback: ESPTOOL write_flash 0x0 ~/lilyshark-backups/<the backup>.bin
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-image="${repo}/.pio/build/t-deck/firmware.bin"
+env_name=t-deck
 backups="${HOME}/lilyshark-backups"
 esptool=("${backups}/.venv/bin/python" -m esptool)
 wait_min=0
@@ -17,11 +19,13 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --wait) wait_min="${2:-30}"; shift 2 ;;
     --backup) reuse="$2"; shift 2 ;;   # a full backup already taken from this deck: skip the 10 minute read
-    *) echo "usage: flash.sh [--wait MINUTES] [--backup FILE]" >&2; exit 2 ;;
+    --env) env_name="$2"; shift 2 ;;
+    *) echo "usage: flash.sh [--env NAME] [--wait MINUTES] [--backup FILE]" >&2; exit 2 ;;
   esac
 done
 
-[[ -s "${image}" ]] || { echo "no firmware at ${image}: build with platformio run -e t-deck" >&2; exit 1; }
+image="${repo}/.pio/build/${env_name}/firmware.bin"
+[[ -s "${image}" ]] || { echo "no firmware at ${image}: build with platformio run -e ${env_name}" >&2; exit 1; }
 size=$(stat -f %z "${image}")
 (( size < 0x640000 )) || { echo "firmware is ${size} bytes: larger than the 6.25 MB app slot" >&2; exit 1; }
 
@@ -70,6 +74,10 @@ for try in 1 2 3; do
   (( ${#ports[@]} == 1 )) || { echo "WRITE FAILED and the deck did not come back" >&2; exit 1; }
   port="${ports[0]}"; sleep 2
 done
+if [[ "${env_name}" == setup-rush ]]; then
+  "${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before default_reset --after no_reset erase_region 0x650000 0x640000 | tail -1
+  slot=1  # and clear the OTA choice below, so the bootloader takes the first slot
+fi
 if [[ "${slot}" != 0 ]]; then
   "${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before default_reset --after no_reset erase_region 0xe000 0x2000 | tail -1
 fi
