@@ -583,7 +583,15 @@ static void ind_palette(void) {
 }
 
 static uint8_t preset;
+/* the big work arrays: static on the calculator; on the T-Deck they come from the heap (its static RAM is nearly
+ * full with the firmware's own) */
+#ifdef SR_TDECK
+#define BIG(type, name, n) static type *name; if (!name) name = (type *)calloc(n, sizeof(type))
+static int (*is)[MAXB];           /* overlay series, price units */
+#else
+#define BIG(type, name, n) static type name[n]
 static int is[5][MAXB];           /* overlay series, price units */
+#endif
 static int ps[3][MAXB];           /* pane series: RSI 0..100; MACD line, signal, histogram in price units */
 static int8_t sdir[MAXB];         /* ribbon e8 > e55, bands squeeze, supertrend direction (-1 up, as Pine) */
 typedef struct { int start, conf, brk, lvl; bool res; } Lvl;
@@ -599,7 +607,7 @@ static float sqrt_f(float x) {
 }
 
 static void ind_compute(void) {
-    static float c[MAXB];
+    BIG(float, c, MAXB);
     int n = nbars < MAXB ? nbars : MAXB;
     for (int i = 0; i < n; i++) c[i] = (float)BC(i);
     nlv = 0; evDone = lead - 1;
@@ -616,7 +624,7 @@ static void ind_compute(void) {
         ps[0][0] = 50;
     } else if (preset == 1) {
         float e12 = c[0], e26 = c[0], sg = 0;
-        static float bw[MAXB];
+        BIG(float, bw, MAXB);
         for (int i = 0; i < n; i++) {
             e12 += (2.0f / 13) * (c[i] - e12); e26 += (2.0f / 27) * (c[i] - e26);
             float m = e12 - e26; if (i == 0) sg = m; sg += (2.0f / 10) * (m - sg);
@@ -2160,6 +2168,9 @@ int srush_main(void) {
 #endif
     if (!nwin) return 1;
 
+#ifdef SR_TDECK
+    if (!is) is = calloc(5, sizeof *is);
+#endif
     gfx_Begin();
     palette();
     ind_palette();

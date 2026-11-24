@@ -14,17 +14,29 @@ typedef struct { bool on; uint8_t type; uint32_t start, len, att; float f, fmul,
 enum { SINE, TRI, SQUARE, SAW };
 enum { BP, LP, HP };
 
-static Voice v[NV];
-static Hiss h[NH];
+static Voice *v;   /* the tables and the delay line come from the heap: the firmware leaves little static RAM */
+static Hiss *h;
 static uint32_t now;            /* samples rendered so far */
 static uint32_t rng = 0x9e3779b9u;
-static float room[2048]; static int roomI;           /* 85 ms at 22.05 kHz = 1874 samples */
+static float *room; static int roomI;           /* 85 ms at 22.05 kHz = 1874 samples */
 static float damp, env = 0;
 static uint32_t lastTick, lastClink;
 
 static float st(float n) { return powf(2.0f, n / 12.0f); }
 static uint32_t ms(float s) { return (uint32_t)(s * RATE); }
 
+static float *sinT; static bool sinReady;   /* sinf per sample per voice is too slow on the ESP32 */
+static bool ready(void)
+{
+    if (sinReady) return true;
+    if (!v) v = calloc(NV, sizeof *v);
+    if (!h) h = calloc(NH, sizeof *h);
+    if (!room) room = calloc(2048, sizeof *room);
+    if (!sinT) sinT = malloc(256 * sizeof *sinT);
+    if (!v || !h || !room || !sinT) return false;
+    for (int i = 0; i < 256; i++) sinT[i] = sinf(i * 6.2831853f / 256);
+    return sinReady = true;
+}
 static void voice(float f, float to, int type, float dur, float vol, float at, float attack)
 {
     for (int i = 0; i < NV; i++) if (!v[i].on) {
@@ -66,6 +78,7 @@ static void win(int combo, int size)
 
 void sr_sfx(int id, int a)
 {
+    if (!ready()) return;
     switch (id) {
     case SFX_TAP: HS(0.025f, 0.05f, 0, HP, 3500, 0, 0.9f); V(1900, 0, TRI, 0.03f, 0.02f, 0); break;
     case SFX_CANDLE: if (now - lastTick < ms(0.07f)) return; lastTick = now; HS(0.018f, 0.022f, 0, HP, 5200, 0, 0.9f); break;
@@ -97,7 +110,6 @@ void sr_sfx(int id, int a)
     }
 }
 
-static float sinT[256]; static bool sinReady;   /* sinf per sample per voice is too slow on the ESP32 */
 static float osc(int type, float ph)
 {
     switch (type) {
@@ -119,7 +131,7 @@ static void coefs(Hiss *o)
 
 void sr_audio_render(int16_t *out, int n)
 {
-    if (!sinReady) { for (int i = 0; i < 256; i++) sinT[i] = sinf(i * 6.2831853f / 256); sinReady = true; }
+    if (!ready()) { memset(out, 0, (size_t)n * sizeof *out); return; }
     for (int s = 0; s < n; s++, now++) {
         float x = 0;
         for (int i = 0; i < NV; i++) {

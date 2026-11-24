@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Put the Setup Rush build on a plugged-in T-Deck, keeping its settings.
-#   tools/setup_rush/flash.sh [--wait MINUTES]
+#   tools/setup_rush/flash.sh [--wait MINUTES] [--backup FILE]
 # 1. waits for the deck's serial port (one /dev/cu.usbmodem*),
 # 2. reads the whole 16 MB flash to ~/lilyshark-backups/ (the rollback: write it back at 0x0),
 # 3. writes .pio/build/t-deck/firmware.bin to the first app slot at 0x10000; if the deck was booting the second
@@ -12,7 +12,14 @@ image="${repo}/.pio/build/t-deck/firmware.bin"
 backups="${HOME}/lilyshark-backups"
 esptool=("${backups}/.venv/bin/python" -m esptool)
 wait_min=0
-if [[ "${1:-}" == "--wait" ]]; then wait_min="${2:-30}"; fi
+reuse=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --wait) wait_min="${2:-30}"; shift 2 ;;
+    --backup) reuse="$2"; shift 2 ;;   # a full backup already taken from this deck: skip the 10 minute read
+    *) echo "usage: flash.sh [--wait MINUTES] [--backup FILE]" >&2; exit 2 ;;
+  esac
+done
 
 [[ -s "${image}" ]] || { echo "no firmware at ${image}: build with platformio run -e t-deck" >&2; exit 1; }
 size=$(stat -f %z "${image}")
@@ -28,9 +35,14 @@ while :; do
 done
 echo "deck on ${port}"
 
-backup="${backups}/tdeck-flash-$(date +%Y%m%d-%H%M%S).bin"
-"${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before default_reset --after no_reset \
-  read_flash 0x0 0x1000000 "${backup}" | tr '\r' '\n' | grep -vE '^[0-9]+ \(' | tail -3
+if [[ -n "${reuse}" ]]; then
+  backup="${reuse}"
+  "${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before default_reset --after no_reset read_mac | tail -1
+else
+  backup="${backups}/tdeck-flash-$(date +%Y%m%d-%H%M%S).bin"
+  "${esptool[@]}" --chip esp32s3 --port "${port}" --baud 921600 --before default_reset --after no_reset \
+    read_flash 0x0 0x1000000 "${backup}" | tr '\r' '\n' | grep -vE '^[0-9]+ \(' | tail -3
+fi
 [[ $(stat -f %z "${backup}") == 16777216 ]] || { echo "backup is not 16 MB: not flashing" >&2; exit 1; }
 echo "backup: ${backup}"
 strings -n 8 "${backup}" | grep -m1 -E '"fw":|Lilyshark starting' || true
