@@ -41,8 +41,10 @@ void sr_input_scan(uint8_t kb[8])
         bool back = c == 8 || c == 0x7f || c == 27 || c == 'q';
         if (play) {
             if (back) push(T_CLEAR);
-            else if (c == 'w' || c == ' ') { latchLong = !latchLong; latchShort = false; }
-            else if (c == 's') { latchShort = !latchShort; latchLong = false; }
+            /* W: ride long (again: let go). S: ride short, or flip a long short the way a slide does (again: let
+             * go). W on a short flips it back long. The long latch stays down under a short: that is the slide. */
+            else if (c == 'w' || c == ' ') { if (latchShort) latchShort = false, latchLong = true; else latchLong = !latchLong; }
+            else if (c == 's') { if (latchShort) latchShort = latchLong = false; else latchShort = true, latchLong = true; }
             else if (c == '\r' || c == '\n') latchLong = latchShort = false;
         } else {
             if (back) push(T_CLEAR);
