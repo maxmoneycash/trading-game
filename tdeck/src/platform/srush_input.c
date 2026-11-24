@@ -2,7 +2,7 @@
  *   In a round:  hold the screen = ride long, slide down = flip short (slide back up = long again); the thumb ring
  *                sits where the finger landed. Holding the trackball click also rides long. Keyboard: W or SPACE
  *                rides long until pressed again, S rides short, ENTER lets go, DEL or Q ends the round.
- *   Elsewhere:   tap what you want (the mode card steps, the chart row steps, PLAY plays), swipe or roll the
+ *   Elsewhere:   tap what you want (the game hit-tests the tap against its own screen), swipe or roll the
  *                trackball = move, trackball click or ENTER = select,
  *                W A S D move, DEL or Q = back (out of the game from the menu).
  * A hold only counts if it began in the round, so the tap that starts a round never opens a ride. */
@@ -85,10 +85,8 @@ void sr_input_scan(uint8_t kb[8])
             gest = false;
             int dx = sr.touch_x - sx, dy = sr.touch_y - sy, adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
             if (adx < 14 && ady < 14) {
-                /* a tap lands on what it touches. The menu: the mode card (its upper half steps up, its lower half
-                 * down), the chart row under it (left and right), PLAY. Results: anywhere plays again. */
-                if (scene == 0 && sy >= 148 && sy < 193 && sx < 268) push(sy < 170 ? T_UP : T_DOWN);
-                else if (scene == 0 && sy >= 193 && sx < 170) push(sx < 84 ? T_LEFT : T_RIGHT);
+                /* a tap lands on what it touches: the menu and results hit-test their own layout; the intro takes any tap */
+                if (scene == 0 || scene == 2) { sr.tapped = true; sr.tap_x = sx; sr.tap_y = sy; }
                 else push(T_ENTER);
             }
             else if (ady >= adx) push(dy > 0 ? T_DOWN : T_UP);

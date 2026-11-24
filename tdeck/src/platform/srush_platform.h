@@ -40,6 +40,8 @@ typedef struct {
     bool (*save_store)(const uint8_t *buf, size_t len);
     /* set by srush_input.c: a finger riding in a round, and where it is */
     bool touch_down; int16_t touch_x, touch_y;
+    /* a tap on the menu or results, for the game to hit-test against its own layout (it clears tapped) */
+    bool tapped; int16_t tap_x, tap_y;
 } SrPlatform;
 extern SrPlatform sr;
 int srush_main(void);
