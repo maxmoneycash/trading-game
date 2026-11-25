@@ -709,7 +709,13 @@ static const char *const BOT_DESC[NBOT] = { "LONG WHILE THE 8 EMA IS OVER THE 55
     "LONG OVER THE SIGNAL LINE, SHORT UNDER", "BUYS UNDER THE LOW BAND, SELLS OVER THE HIGH, OUT AT THE MEAN",
     "LONG WHEN IT FLIPS UP, SHORT WHEN IT FLIPS DOWN", "LONG OVER VWAP, SHORT UNDER", "LONG A RESISTANCE BREAK, SHORT A SUPPORT BREAK" };
 static const uint8_t BOT_PRESET[NBOT] = { 0, 0, 1, 1, 2, 3, 3 };
+#ifdef SR_TDECK
+#define FULL_APP 1
 static int8_t botI = -1;           /* the bot trading this round, or -1: you */
+#else
+#define FULL_APP 0                 /* the calculator has no room for bots, the tape, the recap or the intro: they compile away */
+static const int8_t botI = -1;
+#endif
 static int8_t botPos[MAXB];
 static void bot_prep(void) {
     int n = nbars < MAXB ? nbars : MAXB; int8_t p = 0;
@@ -730,7 +736,11 @@ static void bot_prep(void) {
 }
 
 /* Racing a bot: you trade, the bot trades the same chart beside you, on each bar's close, at the same size. */
+#if FULL_APP
 static bool botRace;                 /* racing the bot rather than watching it */
+#else
+static const bool botRace = false;
+#endif
 static uint8_t botBeat;              /* the bots you have beaten, a bit each (saved) */
 static int8_t botDir; static float botEntry, botReal; static int botLast, botLead;
 typedef struct { int bar; int8_t dir; } BotMark;
@@ -2059,9 +2069,9 @@ static bool shopInit;
 #define PAN_W 130
 static int tabX[NTAB], tabW[NTAB];
 static void tab_layout(void) {
-    int sum = 0; for (int t = 0; t < NTAB; t++) { tabW[t] = textw(TAB_NAME[t], 1); sum += tabW[t]; }
-    int gap = (308 - sum) / (NTAB - 1), x = 8;
-    for (int t = 0; t < NTAB; t++) { tabX[t] = x; x += tabW[t] + gap; }
+    int sum = 0, nt = 0; for (int t = 0; t < NTAB; t++) { tabW[t] = FULL_APP || t != 1 ? textw(TAB_NAME[t], 1) : 0; sum += tabW[t]; nt += tabW[t] > 0; }
+    int gap = (308 - sum) / (nt - 1), x = 8;
+    for (int t = 0; t < NTAB; t++) if (tabW[t]) { tabX[t] = x; x += tabW[t] + gap; }
 }
 /* the R mark at a third of its size, each pixel the average of the 3 x 3 it stands for */
 static void mark_mini(int x0, int y0) {
@@ -2113,8 +2123,17 @@ static int text_wrap(const char *s, int x, int y, int maxw, uint8_t col) {
     }
     return y;
 }
-static uint8_t tab_rows(void) { return tab == 0 ? NMODES : tab == 1 ? NBOT : tab == 2 ? NSTAGE : tab == 3 ? 3 : NTHEME + NSTYLE; }
-static uint8_t *tab_row(void) { return tab == 0 ? &menuI : tab == 1 ? &botSel : tab == 2 ? &stSel : tab == 3 ? &msRow : &shopSel; }
+#define IS_BOTS (FULL_APP && tab == 1)
+#define TAB_LIVE(t) (((t) != 1 || FULL_APP) && ((t) != 2 || hasCareer))
+#if FULL_APP
+#define BOT_SET(v) (botI = (v))
+#define BOT_RACE(v) (botRace = (v))
+#else
+#define BOT_SET(v) ((void)0)
+#define BOT_RACE(v) ((void)0)
+#endif
+static uint8_t tab_rows(void) { return tab == 0 ? NMODES : IS_BOTS ? NBOT : tab == 2 ? NSTAGE : tab == 3 ? 3 : NTHEME + NSTYLE; }
+static uint8_t *tab_row(void) { return tab == 0 ? &menuI : IS_BOTS ? &botSel : tab == 2 ? &stSel : tab == 3 ? &msRow : &shopSel; }
 static void best_text(char *d, uint8_t m) { if (m == M_CALLIT) { char *o = digits(d, (long)bestM[m], 0, 0); strcpy(o, " PTS"); } else money_to(d, bestM[m], false); }
 
 static bool menu(uint8_t *sel) {
@@ -2122,7 +2141,9 @@ static bool menu(uint8_t *sel) {
     uint8_t nprac = nwin < NPRACTICE ? nwin : NPRACTICE;
     bool hasCareer = nwin >= NPRACTICE + NSTAGE;
     missions_today(today());
+#if FULL_APP
     if (!tapeN) tape_prep();
+#endif
     tab_layout();
     if (!shopInit) { shopSel = themeI; shopInit = true; }
     uint8_t free_sel = (uint8_t)(today() % nprac);
@@ -2138,17 +2159,17 @@ static bool menu(uint8_t *sel) {
         latch();
         uint8_t n = tab_rows(), *row = tab_row();
         int tabTo = -1, marketStep = 0;
-        bool watch = tab == 1 && focus == 2 && go;   /* on the bots' market row, ENTER watches */
+        bool watch = IS_BOTS && focus == 2 && go;   /* on the bots' market row, ENTER watches */
 #ifdef SR_TOUCH
         if (sr.tapped) { /* what the finger touched */
             sr.tapped = false;
             int tx = sr.tap_x, ty = sr.tap_y;
-            if (ty < 54) { for (int t = 0; t < NTAB; t++) if (tx >= tabX[t] - 8 && tx < tabX[t] + tabW[t] + 8 && ty >= 28) tabTo = t; }
+            if (ty < 54) { for (int t = 0; t < NTAB; t++) if ((FULL_APP || t != 1) && tx >= tabX[t] - 8 && tx < tabX[t] + tabW[t] + 8 && ty >= 28) tabTo = t; }
             else if (tx >= LIST_X && tx < LIST_X + LIST_W && ty >= LIST_Y && ty < LIST_Y + ROWS * ROW_H && tab != 3) {
                 int r = topOf[tab] + (ty - LIST_Y) / ROW_H;
                 if (r < n) { focus = 1; if (r == *row) go = true; else { *row = (uint8_t)r; SFX(SFX_TAP, 0); } }
             }
-            else if (ty >= 198 && tab == 1) { /* the bots: the market, WATCH, RACE */
+            else if (ty >= 198 && IS_BOTS) { /* the bots: the market, WATCH, RACE */
                 if (tx < 146) { focus = 2; if (tx < 50) marketStep = -1; else if (tx > 96) marketStep = 1; }
                 else if (tx < 212) { go = true; watch = true; }
                 else go = true;
@@ -2164,7 +2185,7 @@ static bool menu(uint8_t *sel) {
             if (dn) { if (*row + 1 < n && tab != 3) (*row)++; else if (tab != 4) focus = 2; }
             if (lt) tabTo = (tab + NTAB - 1) % NTAB; if (rt) tabTo = (tab + 1) % NTAB;
         } else { if (up) focus = 1; if (lt) marketStep = -1; if (rt) marketStep = 1; }
-        if (tabTo >= 0 && tabTo != tab) { if (tabTo == 2 && !hasCareer) tabTo = lt ? 1 : 3; tab = (uint8_t)tabTo; n = tab_rows(); row = tab_row(); }
+        if (tabTo >= 0 && tabTo != tab) { for (int g = 0; g < NTAB && !TAB_LIVE(tabTo); g++) tabTo = lt ? (tabTo + NTAB - 1) % NTAB : (tabTo + 1) % NTAB; tab = (uint8_t)tabTo; n = tab_rows(); row = tab_row(); }
         if (*row >= n) *row = (uint8_t)(n - 1);
         if (*row < topOf[tab]) topOf[tab] = *row;
         if (*row >= topOf[tab] + ROWS) topOf[tab] = (uint8_t)(*row - ROWS + 1);
@@ -2186,12 +2207,12 @@ static bool menu(uint8_t *sel) {
                 else SFX(SFX_WRONG, 0);
                 save_save();
             } else if (tab == 2) {
-                if (stage_open(stSel)) { stage = (int8_t)stSel; mode = CAREER[stSel].mode; *sel = w; botI = -1; return true; }
+                if (stage_open(stSel)) { stage = (int8_t)stSel; mode = CAREER[stSel].mode; *sel = w; BOT_SET(-1); return true; }
                 SFX(SFX_WRONG, 0);
             } else {
                 stage = -1;
-                if (tab == 1) { botI = (int8_t)botSel; botRace = !watch; mode = M_PRO; }
-                else { botI = -1; mode = tab == 3 ? M_FREE : menuI; }
+                if (IS_BOTS) { BOT_SET((int8_t)botSel); BOT_RACE(!watch); mode = M_PRO; }
+                else { BOT_SET(-1); mode = tab == 3 ? M_FREE : menuI; }
                 if (mode == M_FREE) *sel = w;
                 return true;
             }
@@ -2212,11 +2233,14 @@ static bool menu(uint8_t *sel) {
         }
         /* the tabs */
         for (int t = 0; t < NTAB; t++) {
+            if (!FULL_APP && t == 1) continue;
             bool on = t == tab, dead = t == 2 && !hasCareer;
             text(TAB_NAME[t], tabX[t], 37, dead ? C_BORDER : on ? (focus == 0 ? C_ORANGE : C_TEXT) : C_MUTED, 1);
             if (on) { gfx_SetColor(C_ORANGE); gfx_FillRectangle(tabX[t], 47, tabW[t], 2); }
         }
+#if FULL_APP
         draw_tape(57);
+#endif
         /* the list */
         for (int r = 0; r < ROWS && tab != 3; r++) {
             int i = topOf[tab] + r; if (i >= n) break;
@@ -2226,7 +2250,7 @@ static bool menu(uint8_t *sel) {
             if (tab == 0) {
                 text(MODE_NAME[i], LIST_X + 13, ty, col, 1);
                 if (hasM & (1 << i)) { best_text(d, (uint8_t)i); text_r(d, LIST_X + LIST_W - 6, ty, bestM[i] < 0 ? C_BEAR : C_MUTED, 1); }
-            } else if (tab == 1) {
+            } else if (IS_BOTS) {
                 text(BOT_NAME[i], LIST_X + 13, ty, col, 1);
                 if (botBeat & (1 << i)) { int cx = LIST_X + LIST_W - 16; gfx_SetColor(C_ORANGE); gfx_Line(cx, ty + 3, cx + 3, ty + 6); gfx_Line(cx + 3, ty + 6, cx + 9, ty); gfx_Line(cx, ty + 4, cx + 3, ty + 7); gfx_Line(cx + 3, ty + 7, cx + 9, ty + 1); }
             } else if (tab == 2) {
@@ -2271,7 +2295,7 @@ static bool menu(uint8_t *sel) {
                 y = text_wrap(MODE_DESC[menuI], px, y, pw, C_MUTED);
                 mini_chart(px, 136, pw, 34);
                 if (hasM & (1 << menuI)) { text("BEST", px, 176, C_MUTED, 1); best_text(d, menuI); text_r(d, px + pw, 176, bestM[menuI] < 0 ? C_BEAR : C_TEXT, 1); }
-            } else if (tab == 1) {
+            } else if (IS_BOTS) {
                 text("BOT", px, y, C_ORANGE, 1); y += 12;
                 text(BOT_NAME[botSel], px, y, C_TEXT, textw(BOT_NAME[botSel], 2) <= pw ? 2 : 1); y += 20;
                 y = text_wrap(BOT_DESC[botSel], px, y, pw, C_MUTED);
@@ -2303,7 +2327,7 @@ static bool menu(uint8_t *sel) {
             }
         }
         /* bottom: the market (left and right step it) and the action */
-        int mw = tab == 1 ? 140 : 172;
+        int mw = IS_BOTS ? 140 : 172;
         frame(6, 200, mw, 32, 6, focus == 2 ? C_MUTED : C_BORDER, C_CARD);
         if (tab == 4) { text("TO SPEND", 16, 206, C_MUTED, 1); o = digits(d, (long)cash, 0, 0); strcpy(o, " XP"); text(d, 16, 217, C_TEXT, 1); }
         else {
@@ -2317,10 +2341,10 @@ static bool menu(uint8_t *sel) {
         }
         {
             bool style = tab == 4 && shopSel >= NTHEME;
-            const char *act = tab == 1 ? "RACE" : style ? (chartStyle == shopSel - NTHEME ? "USING" : "USE") : tab == 4 ? (themeI == shopSel ? "WEARING" : (owned & (1 << shopSel)) ? "WEAR" : "BUY") : "PLAY";
+            const char *act = IS_BOTS ? "RACE" : style ? (chartStyle == shopSel - NTHEME ? "USING" : "USE") : tab == 4 ? (themeI == shopSel ? "WEARING" : (owned & (1 << shopSel)) ? "WEAR" : "BUY") : "PLAY";
             bool dead = (tab == 2 && !stage_open(stSel)) || (style && chartStyle == shopSel - NTHEME) ||
                         (tab == 4 && !style && themeI == shopSel) || (tab == 4 && !style && !(owned & (1 << shopSel)) && cash < THEMES[shopSel].price);
-            if (tab == 1) { /* watch it alone, or race it */
+            if (IS_BOTS) { /* watch it alone, or race it */
                 frame(150, 202, 58, 26, 6, focus == 2 ? C_MUTED : C_BORDER, C_CARD); text_c("WATCH", 179, 211, focus == 2 ? C_TEXT : C_MUTED, 1);
                 keycap(214, 202, 100, act);
             }
@@ -2476,7 +2500,7 @@ static bool play(uint8_t sel, float *out_total) {
         if (introT > 0) introT -= dt;
         else if (ended) {
             bool skip = now_s - endT > 2.0f && ((L && !prevL) || (D && !prevD) || pressed(6, kb_Enter));
-            if (now_s - endT > (mode == M_CALLIT ? 1.6f : 6.0f) || skip) {
+            if (now_s - endT > (mode == M_CALLIT || !FULL_APP ? 1.6f : 6.0f) || skip) {
                 *out_total = mode == M_CALLIT ? points : mode == M_BLOWUP ? bank : realized;
                 latch(); return true;
             }
@@ -2618,7 +2642,7 @@ static bool play(uint8_t sel, float *out_total) {
 #else
 #define T_(i)
 #endif
-        if (ended && mode != M_CALLIT && now_s - endT > 0.5f) { /* the recap: the whole round and every ride */
+        if (FULL_APP && ended && mode != M_CALLIT && now_s - endT > 0.5f) { /* the recap: the whole round and every ride (the T-Deck: no room on the calculator) */
             float tot = mode == M_BLOWUP ? bank : realized;
             gfx_FillScreen(C_BG);
             draw_recap(now_s - endT - 0.5f);
@@ -2852,7 +2876,9 @@ int srush_main(void) {
         if (id[3] < NMODES) menuI = id[3]; if (id[4] < NSTAGE) { tab = 2; stSel = id[4]; } }
     scan(); latch();
 
+#if FULL_APP   /* the intro page: the T-Deck only (the calculator has no room) */
     if (!intro()) { gfx_End(); return 0; }
+#endif
     while (menu(&sel)) {
         for (;;) {
             float total;
