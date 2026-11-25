@@ -10,7 +10,7 @@ log = s.read(100000)
 last = None
 for step in sys.argv[2:]:
     kind, _, arg = step.partition(':')
-    if kind == 'start':  # the lilyshark firmware opens the game on a line; the Setup Rush firmware is already in it
+    if kind == 'start':  # older firmware opened the game on a line; this firmware is already in it
         if b'Lilyshark' in log: s.write(b'SRUSH\n')
         time.sleep(1.5)
     elif kind == 'key': s.write(arg.encode().decode('unicode_escape').encode('latin1')); time.sleep(0.15)

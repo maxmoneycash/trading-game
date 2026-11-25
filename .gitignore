@@ -1,0 +1,14 @@
+local.env
+*.rom
+.DS_Store
+__pycache__/
+# builds
+ti84/bin/
+ti84/obj/
+ti84/tools/ti-link
+ti84/emu/run/
+tdeck/.pio/
+tdeck/src/platform/srush_game.c
+# the app's private engine (data/cv/setups.cjs reads it from a setup-rush checkout)
+data/cv/engine.js
+data/cv/candle-vision.js

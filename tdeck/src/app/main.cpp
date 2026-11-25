@@ -1,7 +1,7 @@
 // Setup Rush as the whole T-Deck firmware: it powers on into the game's intro, then the menu, then a round.
 // Nothing else runs: no LVGL, no radio (the SX1262 is held in reset), no mesh. Only the game (src/setup_rush),
 // the screen, touch, trackball, keyboard, speaker, and the GPS for the date.
-// Build: platformio run -e setup-rush. The lilyshark firmware is env:t-deck.
+// Build: platformio run (in tdeck/).
 #include <Arduino.h>
 #include <Preferences.h>
 #include <SPI.h>
@@ -13,22 +13,22 @@
 #include <cstring>
 #include <ctime>
 
-#include "lilyshark/device/hardware_status.h"
-#include "lilyshark/device/tdeck_display_init.h"
-#include "lilyshark/device/touch.h"
-#include "lilyshark/tdeck.h"
-#include "setup_rush/srush_platform.h"
+#include "tdeck/device/hardware_status.h"
+#include "tdeck/device/tdeck_display_init.h"
+#include "tdeck/device/touch.h"
+#include "tdeck/tdeck.h"
+#include "../platform/srush_platform.h"
 
-namespace tdeck = lilyshark::tdeck;
+namespace tdeck = deck::tdeck;
 
 namespace {
 
-extern "C" const uint8_t srush_pack_start[] asm("_binary_data_setup_rush_srpack_bin_start");
-extern "C" const uint8_t srush_pack_end[] asm("_binary_data_setup_rush_srpack_bin_end");
+extern "C" const uint8_t srush_pack_start[] asm("_binary_data_srpack_bin_start");
+extern "C" const uint8_t srush_pack_end[] asm("_binary_data_srpack_bin_end");
 
 TFT_eSPI display;
-lilyshark::TDeckTouch touch;
-lilyshark::TDeckHardwareStatus gps_clock{};
+deck::TDeckTouch touch;
+deck::TDeckHardwareStatus gps_clock{};
 bool keyboard_ready = false;
 
 uint16_t *fb = nullptr;
@@ -244,7 +244,7 @@ void raw(SrRaw *r)
     r->click = digitalRead(tdeck::trackball_press_pin) == LOW;
 
     if(touch.present() && touch.poll()) {
-        const lilyshark::TouchPoint point = touch.point();
+        const deck::TouchPoint point = touch.point();
         touch_was = point.pressed;
         if(point.pressed) { r->tx = static_cast<int16_t>(point.x); r->ty = static_cast<int16_t>(point.y); }
     } else {
@@ -322,7 +322,7 @@ void setup()
 
     SPI.begin(tdeck::spi_sck_pin, tdeck::spi_miso_pin, tdeck::spi_mosi_pin);
     display.begin();
-    lilyshark::applyTDeckDisplayInit(display);
+    deck::applyTDeckDisplayInit(display);
     display.setRotation(1);
     display.fillScreen(TFT_BLACK);
 

@@ -1,4 +1,4 @@
-/* Setup Rush on the T-Deck: the TI-84 Plus CE game (setup-rush-ti84/game/src/main.c) runs unchanged on top of this.
+/* Setup Rush on the T-Deck: the TI-84 Plus CE game (game/main.c) runs unchanged on top of this.
  * It provides the slice of the CE toolchain's graphx, keypadc, fileioc and sys/rtc the game calls, over a 320x240
  * RGB565 framebuffer, the T-Deck's inputs and an embedded data pack. Palette entries stay 1555 (the game writes them
  * with gfx_RGBTo1555); a colour is resolved to 565 when it is set, so a palette change applies to what is drawn next. */

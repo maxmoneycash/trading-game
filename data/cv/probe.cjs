@@ -1,0 +1,15 @@
+const fs = require('fs');
+const CV = new Function(fs.readFileSync(__dirname + '/candle-vision.js', 'utf8') + '; return CandleVision;')();
+const E = require('./engine.js');
+const { execSync } = require('child_process');
+const show = (p) => execSync(`git -C ${process.env.SETUP_RUSH_REPO} show origin/main:${p}`, { maxBuffer: 1 << 26 }).toString();
+const PACK = 'setup-rush-app/public/history/v2/20261117';
+const rows = JSON.parse(show(`${PACK}/btc-5m-20261117-2.json`)).rows.slice(0, 400);
+const bars = rows.map(r => ({ t: r[0], o: r[1], h: r[2], l: r[3], c: r[4], v: r[5] }));
+const n = E.normalizeBars(bars);
+console.log(Object.keys(n), n.unit, n.candles[0]);
+const rd = E.remoteReader(CV);
+const t0 = Date.now();
+const out = rd.read({ bars: n.candles, fromK: 40, upto: 399 });
+console.log('ms', Date.now() - t0, 'setups', out.setups.length);
+console.log(out.setups.slice(0, 3));

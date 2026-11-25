@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Put the Setup Rush build on a plugged-in T-Deck, keeping its settings.
-#   tools/setup_rush/flash.sh [--env setup-rush|t-deck] [--wait MINUTES] [--backup FILE]
+#   tools/flash.sh [--wait MINUTES] [--backup FILE]
 # --env setup-rush (the Setup Rush-only firmware) also erases the second app slot and the OTA choice, so no copy of
-# lilyshark is left to boot; NVS stays (the game's save lives there; the backup holds everything else).
+# older firmware is left to boot; NVS stays (the game's save lives there; the backup holds everything else).
 # 1. waits for the deck's serial port (one /dev/cu.usbmodem*),
-# 2. reads the whole 16 MB flash to ~/lilyshark-backups/ (the rollback: write it back at 0x0),
-# 3. writes .pio/build/t-deck/firmware.bin to the first app slot at 0x10000; if the deck was booting the second
-#    slot, clears the OTA choice so it boots the first. NVS (radio profile, chat, the game's save) is untouched.
-# Rollback: ESPTOOL write_flash 0x0 ~/lilyshark-backups/<the backup>.bin
+# 2. reads the whole 16 MB flash to ~/tdeck-backups/ (the rollback: write it back at 0x0),
+# 3. writes .pio/build/setup-rush/firmware.bin to the first app slot at 0x10000; if the deck was booting the second
+#    slot, clears the OTA choice so it boots the first. NVS (the game's save) is untouched.
+# Rollback: ESPTOOL write_flash 0x0 ~/tdeck-backups/<the backup>.bin
 set -euo pipefail
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-env_name=t-deck
-backups="${HOME}/lilyshark-backups"
-esptool=("${backups}/.venv/bin/python" -m esptool)
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+env_name=setup-rush
+backups="${TDECK_BACKUPS:-${HOME}/tdeck-backups}"
+esptool=(${ESPTOOL:-"${backups}/.venv/bin/python" -m esptool})
 wait_min=0
 reuse=""
 while [[ $# -gt 0 ]]; do
