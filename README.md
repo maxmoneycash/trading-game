@@ -25,4 +25,5 @@ Machine-specific tool paths go in a git-ignored `local.env` (`set -a; . ./local.
 
 ## License
 
-GPL-3.0 (`LICENSE`). Fonts: Geist Mono and Big Shoulders Display, SIL Open Font License 1.1 (`data/fonts/`).
+GPL-3.0 (`LICENSE`). Fonts: Geist Mono and Big Shoulders Display, SIL Open Font License 1.1 (`data/fonts/`). Emoji candles:
+[Twemoji](https://github.com/jdecked/twemoji), CC-BY 4.0.
