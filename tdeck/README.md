@@ -34,6 +34,8 @@ Menus: tap what you want, swipe or roll the trackball to move, click or ENTER to
 ```sh
 platformio run                                 # in tdeck/
 tools/desktop.sh && .pio/srush/srush OUT SCRIPT  # the game on a desktop: scripted input, PPM frames + audio.raw
+sim/build-native.sh && .pio/sim/trading-game    # the simulator: play it on your computer (SDL2)
+sim/build-web.sh                               # the same in a browser (Emscripten), .pio/web
 tools/flash.sh --wait 30                       # full 16 MB backup first, then the app; NVS (the save) is kept
 python3 tools/deck.py OUT key:$'\r' wait:5 shot:round   # drive a plugged-in deck over USB
 ```

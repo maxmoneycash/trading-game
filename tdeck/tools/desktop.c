@@ -65,7 +65,7 @@ int main(int argc, char **argv)
         unsigned t, k; int sh = 0;
         if (sscanf(line, "%u %x %d", &t, &k, &sh) >= 2) { ev[nev].t = t; ev[nev].keys = k; ev[nev].shot = sh; ev[nev].tx = tx; ev[nev].ty = ty; nev++; }
     }
-    FILE *p = fopen("data/setup_rush/srpack.bin", "rb"); fseek(p, 0, SEEK_END); pack_len = (size_t)ftell(p); fseek(p, 0, SEEK_SET);
+    FILE *p = fopen("data/srpack.bin", "rb"); fseek(p, 0, SEEK_END); pack_len = (size_t)ftell(p); fseek(p, 0, SEEK_SET);
     pack = malloc(pack_len); fread(pack, 1, pack_len, p); fclose(p);
     sr.fb = fb; sr.present = present; sr.raw = raw; sr.millis = ms; sr.unix_time = unix_now; sr.pack = pack; sr.pack_len = pack_len;
     sr.save_load = sload; sr.save_store = sstore;
