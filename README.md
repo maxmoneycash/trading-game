@@ -1,10 +1,11 @@
-# Setup Rush, handheld
+# trading-game
 
-The [Setup Rush](https://setuprush.com) trading game on a TI-84 Plus CE and a LilyGo T-Deck. Real recorded charts,
-one minute a round: hold to ride long, slide to go short, let go to cash out.
+A trading game for calculators and handhelds: [Setup Rush](https://setuprush.com) on the TI-84 Plus CE and the
+LilyGo T-Deck. Real recorded charts, one minute a round: hold to ride long, slide to go short, let go to cash out.
 
 One C file is the whole game. The calculator builds it as is; the T-Deck runs the same file on a layer that copies
-the calculator's graphics, keypad and file calls.
+the calculator's graphics, keypad and file calls, so a port to another device with a small screen and a few buttons
+is that layer and nothing else.
 
 | Folder | |
 |---|---|
