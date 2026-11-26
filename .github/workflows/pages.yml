@@ -20,6 +20,7 @@ jobs:
         with:
           version: 7.0.1   # the version the simulator was tested with
       - run: tdeck/sim/build-web.sh "$GITHUB_WORKSPACE/_site"
+      - run: cp media/tdeck-long.png _site/og.png   # the link preview image
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
