@@ -1,0 +1,59 @@
+# Every push and pull request: the game still builds for the TI-84 Plus CE (and still fits its RAM), the T-Deck,
+# and the desktop simulator. The calculator and T-Deck builds are kept as downloads on each run.
+name: build
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  ti84:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: CE C toolchain v15.0
+        run: |
+          curl -sSL -o /tmp/CEdev.tar.gz https://github.com/CE-Programming/toolchain/releases/download/v15.0/CEdev-Linux.tar.gz
+          tar -xzf /tmp/CEdev.tar.gz -C "$HOME"
+          echo "$HOME/CEdev/bin" >> "$GITHUB_PATH"
+      - run: make -C ti84 && make -C ti84 data
+      - name: Fits in RAM
+        # A compressed program launches only while packed size x 2 + the unpack extra fits (measured limit ~138.7 KB
+        # on an empty OS 5.0.1); the extra is the 24-bit operand of the decompressor's `ld hl,` at byte 111.
+        run: |
+          python3 - <<'PY'
+          d = open('ti84/bin/SRUSH.8xp', 'rb').read()
+          assert d[111] == 0x21, 'decompressor layout changed: re-measure the RAM limit'
+          need = 2 * len(d) + int.from_bytes(d[112:115], 'little')
+          print(f'{len(d)} bytes packed, needs {need} bytes of RAM (limit ~138657, keep 4 KB spare)')
+          assert need <= 138657 - 4096, 'too big for the calculator: see ti84/README.md, Memory'
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ti84
+          path: ti84/bin/*.8x*
+  tdeck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('tdeck/platformio.ini') }}
+      - run: pip install platformio==6.1.19 intelhex
+      - run: cd tdeck && platformio run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tdeck
+          path: |
+            tdeck/.pio/build/setup-rush/firmware.bin
+            tdeck/.pio/build/setup-rush/firmware.factory.bin
+  simulator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libsdl2-dev
+      - run: tdeck/sim/build-native.sh
