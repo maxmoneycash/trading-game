@@ -1,5 +1,7 @@
 # trading-game
 
+[![build](https://github.com/maxmoneycash/trading-game/actions/workflows/build.yml/badge.svg)](https://github.com/maxmoneycash/trading-game/actions/workflows/build.yml) [![simulator](https://github.com/maxmoneycash/trading-game/actions/workflows/pages.yml/badge.svg)](https://maxmoneycash.github.io/trading-game/)
+
 A trading game for calculators and handhelds: [Setup Rush](https://setuprush.com) on the TI-84 Plus CE and the
 LilyGo T-Deck. Real recorded charts, one minute a round: hold to ride long, slide to go short, let go to cash out.
 
@@ -27,6 +29,17 @@ recap of every ride at the end of the round.
 
 Hold 2ND to ride long, DOWN to go short, let go to cash out. Same charts, modes, Career, Missions and Shop; the
 calculator leaves out the bots, the market tape, the recap and the intro to fit in its RAM.
+
+## Install
+
+Every build run on [Actions](https://github.com/maxmoneycash/trading-game/actions/workflows/build.yml) keeps the files
+(`ti84` and `tdeck` artifacts), or build them yourself (Quick start).
+
+- **TI-84 Plus CE:** with TI Connect CE, send the [CE C libraries](https://github.com/CE-Programming/libraries/releases),
+  then `SRD0.8xv`…`SRDF.8xv` and `SRFNT.8xv` to Archive and `SRUSH.8xp` to RAM. Run `Asm(prgmSRUSH)` (OS 5.3+: pick
+  SRUSH in PRGM). It needs about 135 KB of free RAM, so archive your other programs first.
+- **LilyGo T-Deck / T-Deck Plus:** `esptool.py write_flash 0x0 firmware.factory.bin` replaces the deck's firmware
+  (back yours up first: `tdeck/tools/flash.sh` does it for you).
 
 ## How it's built
 
