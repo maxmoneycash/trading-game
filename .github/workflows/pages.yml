@@ -23,7 +23,7 @@ jobs:
           version: 7.0.1   # the version the simulator was tested with
       - run: tdeck/sim/build-web.sh "$GITHUB_WORKSPACE/_site"
       - run: cp media/tdeck-long.png _site/og.png   # the link preview image
-      - name: The install page, with the newest release's T-Deck firmware (served here: release downloads have no CORS)
+      - name: Install page with the newest release firmware   # served here, release downloads have no CORS
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
