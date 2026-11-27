@@ -3,6 +3,8 @@ name: simulator
 on:
   push:
     branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,6 +23,14 @@ jobs:
           version: 7.0.1   # the version the simulator was tested with
       - run: tdeck/sim/build-web.sh "$GITHUB_WORKSPACE/_site"
       - run: cp media/tdeck-long.png _site/og.png   # the link preview image
+      - name: The install page, with the newest release's T-Deck firmware (served here: release downloads have no CORS)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(gh release list -R "$GITHUB_REPOSITORY" -L 1 --json tagName -q '.[0].tagName')
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p trading-game-tdeck-factory.bin -O _site/firmware.bin
+          cp tdeck/sim/install.html _site/
+          printf '{"name":"trading-game","version":"%s","new_install_prompt_erase":true,"builds":[{"chipFamily":"ESP32-S3","parts":[{"path":"firmware.bin","offset":0}]}]}\n' "${TAG#v}" > _site/manifest.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

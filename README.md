@@ -32,13 +32,14 @@ calculator leaves out the bots, the market tape, the recap and the intro to fit 
 
 ## Install
 
-Every build run on [Actions](https://github.com/maxmoneycash/trading-game/actions/workflows/build.yml) keeps the files
-(`ti84` and `tdeck` artifacts), or build them yourself (Quick start).
+Download the files from [Releases](https://github.com/maxmoneycash/trading-game/releases) (v0.1.0 is not yet tested on
+real hardware: back up first), or build them yourself (Quick start).
 
-- **TI-84 Plus CE:** with TI Connect CE, send the [CE C libraries](https://github.com/CE-Programming/libraries/releases),
+- **TI-84 Plus CE:** unzip `trading-game-ti84.zip`; with TI Connect CE, send the [CE C libraries](https://github.com/CE-Programming/libraries/releases),
   then `SRD0.8xv`…`SRDF.8xv` and `SRFNT.8xv` to Archive and `SRUSH.8xp` to RAM. Run `Asm(prgmSRUSH)` (OS 5.3+: pick
   SRUSH in PRGM). It needs about 135 KB of free RAM, so archive your other programs first.
-- **LilyGo T-Deck / T-Deck Plus:** `esptool.py write_flash 0x0 firmware.factory.bin` replaces the deck's firmware
+- **LilyGo T-Deck / T-Deck Plus:** [install from the browser](https://maxmoneycash.github.io/trading-game/install.html)
+  (Chrome or Edge), or `esptool.py write_flash 0x0 trading-game-tdeck-factory.bin`. Either replaces the deck's firmware
   (back yours up first: `tdeck/tools/flash.sh` does it for you).
 
 ## How it's built
