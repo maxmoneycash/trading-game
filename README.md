@@ -32,8 +32,8 @@ calculator leaves out the bots, the market tape, the recap and the intro to fit 
 
 ## Install
 
-Download the files from [Releases](https://github.com/maxmoneycash/trading-game/releases) (v0.1.0 is not yet tested on
-real hardware: back up first), or build them yourself (Quick start).
+Download the files from [Releases](https://github.com/maxmoneycash/trading-game/releases) (v0.1.0: tested on a T-Deck; the
+TI-84 build so far only in the emulator), or build them yourself (Quick start).
 
 - **TI-84 Plus CE:** unzip `trading-game-ti84.zip`; with TI Connect CE, send the [CE C libraries](https://github.com/CE-Programming/libraries/releases),
   then `SRD0.8xv`…`SRDF.8xv` and `SRFNT.8xv` to Archive and `SRUSH.8xp` to RAM. Run `Asm(prgmSRUSH)` (OS 5.3+: pick
